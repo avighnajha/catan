@@ -142,6 +142,7 @@ test('complete geometry contract renders roads, cities, ports and reversible pos
   await expect(page.locator('[data-tile]')).toHaveCount(19);
   await expect(page.locator('#topology')).toBeHidden();
   await page.getByRole('button',{name:'Next event',exact:true}).click();
+  await expect(page.locator('#feed')).toContainText('Ada gave 2 wood to Babbage for 1 ore');
   await expect(page.locator('#players')).toContainText('1 cities');
   await expect(page.locator('#board line[stroke-width="7"]')).toHaveCount(4);
   await expect(page.locator('#board text').filter({hasText:/3:1|2:1/})).toHaveCount(9);

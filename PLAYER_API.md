@@ -2,6 +2,12 @@
 
 Implement one Python class derived from `src.player.Player`. One instance lives for the whole match, independently for each seat. Do not implement JSON transport yourself; the SDK host handles it. Uploads must be trusted local code: resource/process limits are implemented, but filesystem and network access are not isolated.
 
+## Getting the SDK
+
+From the Catan Simulator **My bots** page, choose **Add player version**, then select **Download Player SDK**. The ZIP contains this guide, the public `src.player` interface, and a small starter file under `examples/my_player.py`.
+
+Extract the ZIP into a new folder, edit `examples/my_player.py`, and keep the included `src` folder beside it so the import `from src.player import Player` works locally. When ready, upload your `.py` file from the same **Add player version** dialog. The website validates it and saves it as an immutable version owned by your account.
+
 ```python
 from src.player import Player
 

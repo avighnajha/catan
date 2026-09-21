@@ -20,6 +20,6 @@ export function completeBoardFixture(){
   const later=structuredClone(initial);later.phase='NORMAL_PLAY';later.turn_number=2;later.dice=8;
   for(let i=0;i<4;i++){later.buildings[vertices[i*8].id]={owner:`P${i+1}`,type:i===0?'CITY':'SETTLEMENT'};later.roads[edges[i*9].id]=`P${i+1}`;later.players[i].roads=1;later.players[i].victory_points=i===0?2:1;later.players[i].cities=i===0?1:0;later.players[i].settlements=i===0?0:1;}
   later.tiles.t9.robber=false;later.tiles.t3.robber=true;
-  const frames=[{sequence:0,label:'Initial board',state:initial,events:[]},{sequence:1,label:'Fixture builds and robber move',state:later,events:[]}];
+  const frames=[{sequence:0,label:'Initial board',state:initial,events:[]},{sequence:1,label:'Fixture builds and trade',state:later,events:[{type:'TradeCompleted',player_id:'P1',data:{responder:'P2',give:{WOOD:2},receive:{ORE:1}}}]}];
   return {metadata,replay:{schema_version:1,metadata,geometry:{valid_hex_topology:true,tiles,vertices,edges,ports},frames,events:[],result:{status:'completed',winner:'P1',reason:'Synthetic viewer test fixture',statistics:{dice_rolls:{8:1},roll_count:1,recorded_transitions:1,players:later.players}}}};
 }
