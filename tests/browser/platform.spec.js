@@ -5,12 +5,12 @@ const playerCode=`from src.player.example import ExamplePlayer
 class BrowserPlayer(ExamplePlayer):
     pass
 `;
-async function launchMatch(request,seed=42){const suffix=Date.now().toString(36)+Math.random().toString(36).slice(2,6),names=['Alice','Bob','Carol','Dave'].map(n=>n+suffix);const created=await request.post(`/rooms?room_name=Browser-${suffix}&created_by=${names[0]}`);const rid=(await created.json()).room.room_id;for(const who of names.slice(1))await request.post(`/rooms/${rid}/join`,{data:{player_name:who}});for(const who of names){const bot=`player-${who}`;await request.post('/bots/upload',{data:{bot_name:bot,bot_version:'v1',use_sandbox:true,bot_code:playerCode}});await request.post(`/rooms/${rid}/attach-bot`,{data:{player_name:who,bot_name:bot}});await request.post(`/rooms/${rid}/ready`,{data:{player_name:who,ready:true}});}const started=await request.post(`/rooms/${rid}/start-game`,{data:{seed}});return (await started.json()).game_id;}
-
-test('run, watch, scrub, replay independently, and display responsive results',async({page,context,request})=>{
+test('watch the sample, scrub, replay independently, and display responsive results',async({page,context})=>{
   test.setTimeout(90000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  const gid=await launchMatch(request,41);await page.goto(`/#match/${gid}`);
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Every move. At your own pace.'})).toBeVisible();
+  await page.getByRole('button',{name:'Watch sample match',exact:true}).first().click();
   await expect(page.locator('#timeline')).toBeVisible({timeout:30000});
   await expect(page.locator('[data-tile]')).toHaveCount(19);
   await expect(page.locator('#timeline')).toHaveValue('0');
@@ -48,7 +48,7 @@ test('run, watch, scrub, replay independently, and display responsive results',a
   await page.screenshot({path:'test-results/replay-mobile.png',fullPage:true});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
   await page.getByRole('link',{name:'Matches',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Watch match →'}).first()).toBeVisible();
+  await expect(page.getByRole('button',{name:'Watch sample match',exact:true}).first()).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -109,6 +109,14 @@ test('user names are rendered as text, and missing matches have a recoverable er
   await page.goto('/#match/game-missing');
   await expect(page.getByRole('heading',{name:'Something needs another look.'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Try again'})).toBeVisible();
+});
+
+test('rooms continue refreshing without treating the room list as a function',async({page})=>{
+  await page.goto('/#rooms');
+  await expect(page.getByRole('heading',{name:'Rooms',exact:true})).toBeVisible();
+  await page.waitForTimeout(2500);
+  await expect(page.locator('#notice')).toBeHidden();
+  await expect(page.getByRole('heading',{name:'Rooms',exact:true})).toBeVisible();
 });
 
 test('complete geometry contract renders roads, cities, ports and reversible positions',async({page})=>{

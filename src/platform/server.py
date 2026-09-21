@@ -15,7 +15,9 @@ import json
 import hashlib
 import io
 import zipfile
+from functools import lru_cache
 from ..player.process import terminate_tree, validate_player
+from ..player.example import ExamplePlayer
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +28,7 @@ from pydantic import BaseModel, Field
 from ..simulator.types.identifiers import PlayerId
 from .bot_registry import BotRegistry
 from .bot_runner import BotRunner
+from .recording import RecordingSimulator
 from .replay_store import ReplayStore
 from .room_service import RoomService
 
@@ -151,6 +154,36 @@ def launch(seed, participants, packages, room_id=None, room_name=None):
     store.save_metadata(metadata)
     workers.submit(_run_match, dict(metadata), packages)
     return {"game_id": game_id, "room_id": room_id}
+
+
+@lru_cache(maxsize=1)
+def sample_recording():
+    """A deterministic real-engine replay that never enters the match catalog."""
+    participants = [
+        {"player_id": pid.value, "name": name, "bot_id": "sample-player-v1",
+         "bot_name": "Sample Player", "bot_version": "v1", "color": color}
+        for pid, name, color in zip(
+            PlayerId.all_players(),
+            ("Ada", "Grace", "Linus", "Margaret"),
+            ("#d45b37", "#377da5", "#7759a6", "#d0a229"),
+        )
+    ]
+    simulator = RecordingSimulator(seed=2026)
+    simulator.register_players({pid: ExamplePlayer() for pid in PlayerId.all_players()})
+    simulator.begin_recording()
+    simulator.run()
+    simulator.assert_invariants()
+    metadata = {"game_id": "demo", "seed": 2026, "room_id": None,
+                "room_name": "Sample match", "players": [p["name"] for p in participants],
+                "participants": participants, "status": simulator.result["status"],
+                "created_at": "2026-01-01T00:00:00+00:00", "winner": simulator.result["winner"],
+                "replay_available": True, "engine_version": "2.0", "protocol_version": 1}
+    return simulator.export_recording(metadata)
+
+
+@app.get("/demo/replay")
+def demo_replay():
+    return sample_recording()
 
 
 @app.get("/games")

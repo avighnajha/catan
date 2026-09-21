@@ -182,3 +182,16 @@ def test_game_metadata_endpoints():
     assert detail_response.status_code == 200
     assert detail_response.json()["game_id"] == game_id
     assert detail_response.json()["seed"] == 123
+
+
+def test_sample_replay_uses_real_engine_without_entering_match_catalog():
+    before = {game["game_id"] for game in client.get("/games").json()["games"]}
+    response = client.get("/demo/replay")
+    assert response.status_code == 200
+    replay = response.json()
+    assert replay["metadata"]["game_id"] == "demo"
+    assert replay["metadata"]["room_name"] == "Sample match"
+    assert replay["geometry"]["valid_hex_topology"] is True
+    assert len(replay["frames"]) > 20
+    assert replay["result"]["winner"] is not None
+    assert {game["game_id"] for game in client.get("/games").json()["games"]} == before
