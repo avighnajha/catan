@@ -15,6 +15,8 @@ def test_observations_are_detached_private_and_complete():
     opponent=next(p for p in view.opponents if p.player_id=='P2')
     assert opponent.victory_points==2
     assert 'resources' not in opponent and 'development_cards' not in opponent
+    assert set(opponent).isdisjoint({'WOOD','BRICK','SHEEP','WHEAT','ORE'})
+    assert 'resources' in view.self and 'development_cards' in view.self
     with pytest.raises(TypeError): view.self.resources['WOOD']=100
     before=view.self.resource_count
     grant(sim,PlayerId.P1,{'WOOD':1})

@@ -23,9 +23,12 @@ Example:
 If `player` query string is provided, returns the `GameView`-derived snapshot for that player:
 
 - `player_id`: string (e.g. "P1")
-- `resources`: mapping of resource names to counts (e.g. `{"WOOD": 2}`)
-- `victory_points`: integer
-- `board.tiles`: array of tile objects with `tile_id`, `resource` (or null), and `number_token`.
+- `self.resources`: the requesting player's resource names and counts
+- `self.victory_points`: the requesting player's score
+- `opponents`: public totals and board information only. Entries contain `resource_count`, but never exact `resources` or development-card maps.
+- `board.tiles`: tile objects with terrain, number, robber, and topology IDs.
+
+Exact opponent hands must be inferred from the visible event stream. They are never returned by a player-specific state query.
 
 If `player` is omitted, the public summary contains:
 

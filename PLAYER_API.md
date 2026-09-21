@@ -49,7 +49,7 @@ Views, options and events are detached immutable mappings with attribute access.
 
 - `protocol_version`, `game_id`, `player_id`, `decision_id`.
 - `self`: own resource/development-card maps; newly purchased development cards; piece supplies; resource/card counts; knights; achievements; total own score.
-- `opponents`: public resource/card counts, piece supplies, played knights, achievements and public scores. No hidden card identities or resource maps.
+- `opponents`: public **total card counts**, piece supplies, played knights, achievements and public scores. An opponent has `resource_count`, but never a `resources` map. The view does not reveal how many wood, brick, sheep, wheat, or ore cards an opponent holds.
 - `board.tiles`: resource, number, robber flag, surrounding vertex/edge IDs.
 - `board.vertices`: coordinates, neighboring vertices, edges, tiles, port, owner and building type.
 - `board.edges`: endpoints and owner; `board.ports`: type and endpoints; `board.robber_tile`.
@@ -60,6 +60,8 @@ Views, options and events are detached immutable mappings with attribute access.
 Resource names: `WOOD`, `BRICK`, `SHEEP`, `WHEAT`, `ORE`. Development cards: `KNIGHT`, `ROAD_BUILDING`, `YEAR_OF_PLENTY`, `MONOPOLY`, `VICTORY_POINT`.
 
 The game seed is not sent to players because it would disclose future random outcomes. It is saved in the finished recording and private audit. There is no raw `GameState` in a view.
+
+Only `view.self.resources` contains an exact hand. If you want an estimate of another player's hand, keep your own model from public events such as `ResourcesProduced`, builds, discards, bank trades, and player trades. Hidden theft details and other private information are never added to an opponent entry. The finished spectator replay may reveal all hands for playback, but that replay is produced only after simulation and is never passed to players.
 
 ## Actions
 
