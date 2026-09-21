@@ -28,6 +28,8 @@ def public_state(sim):
                       for k, v in board.vertices.items() if not v.building.is_empty()},
         "roads": {str(k): value(e.road.owner) for k, e in board.edges.items() if not e.road.is_empty()},
         "players": [{"player_id": value(p.player_id),
+                     "resources": {value(resource): amount for resource, amount in p.resources.items()},
+                     "resource_count": p.get_total_resources(),
                      "victory_points": p.get_calculated_victory_points() if state.winner == p.player_id else
                      len(p.settlements) + 2 * len(p.cities) + 2 * int(p.has_longest_road) + 2 * int(p.has_largest_army),
                      "roads": len(p.roads), "settlements": len(p.settlements), "cities": len(p.cities),

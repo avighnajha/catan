@@ -31,6 +31,23 @@ class User(Base):
     # Relationships
     bots = relationship("Bot", back_populates="owner")
     rooms = relationship("Room", back_populates="creator")
+    sessions = relationship("AuthSession", back_populates="user", cascade="all, delete-orphan")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"user_id": self.id, "username": self.username, "email": self.email,
+                "created_at": self.created_at.isoformat() if self.created_at else None}
+
+
+class AuthSession(Base):
+    """Revocable login session. Only a SHA-256 token digest is persisted."""
+    __tablename__ = "auth_sessions"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    user = relationship("User", back_populates="sessions")
 
 
 class Bot(Base):

@@ -22,6 +22,7 @@ class BotPackage:
     bot_code: Optional[str] = None
     use_sandbox: bool = False
     sandbox_config: Optional[SandboxConfig] = None
+    owner_id: Optional[str] = None
 
     def validate(self) -> None:
         self.validation_errors = []
@@ -120,6 +121,7 @@ class BotRegistry:
                 bot_code=db_bot.bot_code,
                 use_sandbox=db_bot.use_sandbox,
                 sandbox_config=sandbox_config,
+                owner_id=owner_id,
             )
         else:
             # In-memory storage
@@ -174,6 +176,7 @@ class BotRegistry:
                     validation_errors=validation_errors,
                     bot_code=db_bot.bot_code,
                     use_sandbox=db_bot.use_sandbox,
+                    owner_id=db_bot.owner_id,
                 )
             return None
         else:
@@ -199,6 +202,7 @@ class BotRegistry:
             validation_errors=validation_errors,
             bot_code=db_bot.bot_code,
             use_sandbox=db_bot.use_sandbox,
+            owner_id=db_bot.owner_id,
         )
     
     def update_validation(

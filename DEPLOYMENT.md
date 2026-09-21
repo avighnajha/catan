@@ -8,7 +8,9 @@ docker compose ps
 curl http://127.0.0.1/health
 ```
 
-The Compose service publishes HTTP on port 80. When a domain is available, terminate TLS with Caddy, nginx, or another reverse proxy and add authentication before opening the service to a wider audience. Back up the named volume with your normal Docker volume backup process.
+The Compose service binds FastAPI to `127.0.0.1:8000`; Caddy terminates public HTTPS. `CATAN_FRONTEND_ORIGINS` must contain the Vercel origin. `CATAN_AUTH_REQUIRED` defaults to `1` in Docker and must remain enabled in production so bot uploads and lobby mutations require a signed-in account.
+
+Accounts, PBKDF2 password hashes, hashed login sessions, bot ownership, rooms, and the match catalog live in `/data/catan.db`. Replay files live in `/data/replays`. Both are covered by the persistent `catan-data` volume; back it up before server migrations.
 
 Uploaded Player implementations execute in child processes with time and resource limits, but they are executable Python and are not a security boundary against a hostile author. Deploy this service for trusted participants. Public untrusted submissions require a separate locked-down runner host or per-match sandbox with no access to the application data volume.
 

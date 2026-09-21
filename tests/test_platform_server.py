@@ -195,3 +195,26 @@ def test_sample_replay_uses_real_engine_without_entering_match_catalog():
     assert len(replay["frames"]) > 20
     assert replay["result"]["winner"] is not None
     assert {game["game_id"] for game in client.get("/games").json()["games"]} == before
+
+
+def test_account_sessions_and_bot_ownership(monkeypatch):
+    from src.platform import server
+    monkeypatch.setattr(server, "AUTH_REQUIRED", True)
+    suffix = uuid.uuid4().hex[:8]
+    assert client.get("/bots").status_code == 401
+    first = client.post("/auth/register", json={"username": f"User {suffix}",
+        "email": f"first-{suffix}@example.com", "password": "a-secure-password"})
+    assert first.status_code == 200
+    first_headers = {"Authorization": f"Bearer {first.json()['token']}"}
+    assert client.get("/auth/me", headers=first_headers).json()["user"]["username"] == f"User {suffix}"
+    uploaded = client.post("/bots/upload", headers=first_headers, json=player_payload("owned-bot"))
+    assert uploaded.status_code == 200
+    assert uploaded.json()["owner_id"] == first.json()["user"]["user_id"]
+
+    second = client.post("/auth/register", json={"username": f"Other {suffix}",
+        "email": f"second-{suffix}@example.com", "password": "another-secure-password"})
+    second_headers = {"Authorization": f"Bearer {second.json()['token']}"}
+    assert client.get("/bots", headers=second_headers).json()["bots"] == []
+    assert client.get(f"/bots/{uploaded.json()['bot_id']}", headers=second_headers).status_code == 403
+    assert client.post("/auth/logout", headers=first_headers).status_code == 200
+    assert client.get("/auth/me", headers=first_headers).status_code == 401

@@ -5,6 +5,24 @@ const playerCode=`from src.player.example import ExamplePlayer
 class BrowserPlayer(ExamplePlayer):
     pass
 `;
+async function register(page,name,email){
+  await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await page.getByRole('button',{name:'New here? Create an account',exact:true}).click();
+  await page.getByRole('textbox',{name:'Display name',exact:true}).fill(name);
+  await page.getByRole('textbox',{name:'Email',exact:true}).fill(email);
+  await page.getByLabel('Password',{exact:true}).fill('browser-test-password');
+  await page.getByRole('button',{name:'Create account',exact:true}).click();
+  await expect(page.locator('#accountName')).toHaveText(name);
+}
+async function uploadBot(page,bot){
+  await page.goto('/#bots');
+  await page.getByRole('button',{name:'+ Add player version',exact:true}).click();
+  await page.getByRole('textbox',{name:'Player name',exact:true}).fill(bot);
+  await page.getByRole('textbox',{name:'Version',exact:true}).fill('v1');
+  await page.getByRole('textbox',{name:'Or paste code',exact:true}).fill(playerCode);
+  await page.getByRole('button',{name:'Save player version',exact:true}).click();
+  await expect(page.getByRole('heading',{name:bot,exact:true})).toBeVisible();
+}
 test('watch the sample, scrub, replay independently, and display responsive results',async({page,context})=>{
   test.setTimeout(90000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -55,21 +73,15 @@ test('watch the sample, scrub, replay independently, and display responsive resu
 test('four participants select a saved bot, ready up and launch a recorded room match',async({page,browser})=>{
   test.setTimeout(120000);
   const suffix=Date.now().toString(36),bot=`Player-${suffix}`;
-  await page.goto('/#bots');
-  await page.getByRole('button',{name:'+ Add player version',exact:true}).click();
-  await page.getByRole('textbox',{name:'Player name',exact:true}).fill(bot);
-  await page.getByRole('textbox',{name:'Version',exact:true}).fill('v1');
-  await page.getByRole('textbox',{name:'Or paste code',exact:true}).fill(playerCode);
-  await page.getByRole('button',{name:'Save player version',exact:true}).click();
-  await expect(page.getByRole('heading',{name:bot,exact:true})).toBeVisible();
+  await page.goto('/#bots');await register(page,'Alice',`alice-${suffix}@example.com`);
+  await uploadBot(page,bot);
   await page.getByRole('link',{name:'Rooms',exact:true}).click();
   await page.getByRole('button',{name:'+ Create room',exact:true}).click();
   await page.getByRole('textbox',{name:'Room name',exact:true}).fill(`Test table ${suffix}`);
-  await page.getByRole('textbox',{name:'Your name',exact:true}).fill('Alice');
   await page.locator('#roomForm').getByRole('button',{name:'Create room',exact:true}).click();
   await expect(page.locator('[data-seat-bot]')).toBeVisible();
   const url=page.url();
-  await page.locator('[data-seat-bot]').selectOption(`${bot}-v1`);
+  await page.locator('[data-seat-bot]').selectOption({index:1});
   await page.getByRole('button',{name:'Mark ready',exact:true}).click();
   await expect(page.getByRole('button',{name:'Not ready',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Not ready',exact:true}).click();
@@ -79,10 +91,10 @@ test('four participants select a saved bot, ready up and launch a recorded room 
   try{
     for(const who of ['Bob','Carol','Dave']){
       const ctx=await browser.newContext();contexts.push(ctx);const participant=await ctx.newPage();
-      await participant.goto(url);await participant.getByRole('textbox',{name:'Your local player name'}).fill(who);
-      await participant.getByRole('textbox',{name:'Your local player name'}).press('Tab');
+      await participant.goto(url);await register(participant,who,`${who.toLowerCase()}-${suffix}@example.com`);
+      await uploadBot(participant,bot);await participant.goto(url);
       await participant.getByRole('button',{name:'Join this room',exact:true}).first().click();
-      await participant.locator('[data-seat-bot]').selectOption(`${bot}-v1`);
+      await participant.locator('[data-seat-bot]').selectOption({index:1});
       await participant.getByRole('button',{name:'Mark ready',exact:true}).click();
       await expect(participant.getByRole('button',{name:'Not ready',exact:true})).toBeVisible();
     }

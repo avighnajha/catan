@@ -15,6 +15,7 @@ PLAYER_COLORS = ("#d45b37", "#377da5", "#7759a6", "#d0a229")
 @dataclass
 class RoomSeat:
     player_name: Optional[str] = None
+    user_id: Optional[str] = None
     bot_runner: Optional[BotRunner | str] = None
     ready: bool = False
     color: Optional[str] = None
@@ -22,6 +23,7 @@ class RoomSeat:
     def to_dict(self) -> Dict[str, object]:
         return {
             "player_name": self.player_name,
+            "user_id": self.user_id,
             "ready": self.ready,
             "bot_runner": self.bot_runner if isinstance(self.bot_runner, str) else getattr(self.bot_runner, 'bot_id', None),
             "color": self.color,
@@ -36,7 +38,7 @@ class Room:
     created_by: Optional[str] = None
     status: str = "waiting"
 
-    def join(self, player_name: str) -> RoomSeat:
+    def join(self, player_name: str, user_id: Optional[str] = None) -> RoomSeat:
         if self.status != "waiting":
             raise ValueError("This room has already started")
         if any(s.player_name == player_name for s in self.seats):
@@ -44,6 +46,7 @@ class Room:
         for index, seat in enumerate(self.seats):
             if seat.player_name is None:
                 seat.player_name = player_name
+                seat.user_id = user_id
                 seat.color = PLAYER_COLORS[index]
                 seat.ready = False
                 return seat
@@ -92,12 +95,13 @@ class RoomService:
             self.rooms: Dict[str, Room] = {}
             self._room_counter = 0
 
-    def create_room(self, room_name: str, created_by: str) -> Room:
+    def create_room(self, room_name: str, created_by: str, user_id: Optional[str] = None) -> Room:
         if self.use_database:
             room_id = f"room-{uuid.uuid4().hex[:8]}"
             seats = [{"player_name": None, "ready": False, "bot_runner": None,
                       "color": PLAYER_COLORS[index]} for index in range(4)]
             seats[0]["player_name"] = created_by  # Creator takes first seat
+            seats[0]["user_id"] = user_id
             
             db_room = self.room_repository.create_room(
                 room_id=room_id,
@@ -121,6 +125,7 @@ class RoomService:
                 
                 room_seats.append(RoomSeat(
                     player_name=seat.get("player_name"),
+                    user_id=seat.get("user_id"),
                     bot_runner=bot_runner,
                     ready=seat.get("ready", False),
                     color=seat.get("color") or PLAYER_COLORS[len(room_seats)],
@@ -153,6 +158,7 @@ class RoomService:
                     created_by=db_room.created_by,
                     status=db_room.status,
                     seats=[RoomSeat(player_name=seat.get("player_name"),
+                                    user_id=seat.get("user_id"),
                                     bot_runner=seat.get("bot_runner"),
                                     ready=seat.get("ready", False),
                                     color=seat.get("color") or PLAYER_COLORS[index])
@@ -181,9 +187,9 @@ class RoomService:
         else:
             return [room.to_dict() for room in self.rooms.values()]
 
-    def join_room(self, room_id: str, player_name: str) -> Room:
+    def join_room(self, room_id: str, player_name: str, user_id: Optional[str] = None) -> Room:
         room = self.get_room(room_id)
-        seat = room.join(player_name)
+        seat = room.join(player_name, user_id)
         
         if self.use_database:
             # Update database
@@ -220,6 +226,7 @@ class RoomService:
                     for s in room.seats:
                         seat_dict = {
                             "player_name": s.player_name,
+                            "user_id": s.user_id,
                             "ready": s.ready,
                             "bot_runner": s.bot_runner if isinstance(s.bot_runner, str) else getattr(s.bot_runner, 'bot_id', None),
                             "color": s.color,

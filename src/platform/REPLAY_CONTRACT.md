@@ -24,7 +24,7 @@ frames:
       tiles: {tile_id: {resource, number, robber}}
       buildings: {vertex_id: {owner, type}}
       roads: {edge_id: owner}
-      players: [{player_id, victory_points, roads, settlements, cities,
+      players: [{player_id, resources, resource_count, victory_points, roads, settlements, cities,
                  knights, longest_road, largest_army}]
 events: flattened public events
 result:
@@ -36,7 +36,7 @@ All states are copied public snapshots. Position zero is the initial board. Each
 
 Full snapshots at each transition intentionally act as checkpoints everywhere for v1. The browser selects a frame directly. Compressing recordings later must preserve exact historical states and use a new schema version if the shape changes.
 
-Only public piece-based points and achievements appear in `victory_points`; unrevealed VP cards and private hands are excluded. Unknown public event types keep their type but no payload until reviewed. No bot code, private GameView, raw GameState, private events, stdout or stderr is included. Anonymous `?player=P1` state queries return 403.
+Only public piece-based points and achievements appear in `victory_points`; unrevealed development cards are excluded. Resource hands are included because a finished replay is a spectator record rather than a live player view. Unknown public event types keep their type but no payload until reviewed. No bot code, private GameView, raw GameState, private events, stdout or stderr is included. Anonymous `?player=P1` state queries return 403.
 
 Status `stopped` means the simulator returned without a winner. `failed` means an error/interrupted job; a failed run may have a partial recording. `completed` requires a winner from the simulator. Neither the browser nor the worker invents victory. Results are withheld from the normal replay presentation until requested or the final frame is reached; this is spoiler avoidance, not access control.
 

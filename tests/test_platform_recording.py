@@ -53,7 +53,8 @@ def test_private_events_unknown_payloads_and_hidden_vp_are_not_exported():
     exported = json.dumps(replay)
     assert "never-export" not in exported
     assert "VICTORY_POINT" not in exported
-    assert all("resources" not in p for f in replay["frames"] for p in f["state"]["players"])
+    assert replay["frames"][-1]["state"]["players"][0]["resources"]["ORE"] == 7
+    assert replay["frames"][-1]["state"]["players"][0]["resource_count"] == 7
     assert replay["frames"][-1]["state"]["players"][0]["victory_points"] == 0
 
 
