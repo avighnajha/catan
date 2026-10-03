@@ -63,6 +63,85 @@ The game seed is not sent to players because it would disclose future random out
 
 Only `view.self.resources` contains an exact hand. If you want an estimate of another player's hand, keep your own model from public events such as `ResourcesProduced`, builds, discards, bank trades, and player trades. Hidden theft details and other private information are never added to an opponent entry. The finished spectator replay may reveal all hands for playback, but that replay is produced only after simulation and is never passed to players.
 
+## Navigating the board
+
+Think of the board as a graph: **tiles** are hexes, **vertices** are corners where settlements/cities go, and **edges** are connections where roads go. Each collection is a mapping keyed by a string ID, not a list. Iterate with `.items()` or look up an entry with `[id]`. IDs are stable throughout a match; treat them as opaque labels rather than parsing coordinates from their names.
+
+| Collection | Fields on each entry |
+|---|---|
+| `board.tiles[tile_id]` | `resource` (resource name or `None` for desert), `number` (dice token; `None` for desert), `has_robber`, `vertices`, `edges` |
+| `board.vertices[vertex_id]` | `x`, `y`, `neighbors` (adjacent vertex IDs), `edges` (incident edge IDs), `tiles` (touching tile IDs), `port` (port ID or `None`), `owner` (player ID or `None`), `building` (`SETTLEMENT`, `CITY`, or `None`) |
+| `board.edges[edge_id]` | `vertices` (the two endpoint IDs), `owner` (road owner or `None`) |
+| `board.ports[port_id]` | `type`, `vertices` (the two coastal endpoint IDs) |
+
+The sequences of IDs are tuples. Their order is not a clockwise traversal. Follow the links between entries instead of relying on sequence positions. Coordinates describe geometry; building actions always use IDs, never coordinates. `board.robber_tile` gives the occupied tile ID. Port types are `THREE_TO_ONE` or `TWO_TO_ONE_WOOD`, `TWO_TO_ONE_BRICK`, `TWO_TO_ONE_SHEEP`, `TWO_TO_ONE_WHEAT`, `TWO_TO_ONE_ORE`.
+
+For example, inspect your buildings and the tiles touching each one:
+
+```python
+for vertex_id, vertex in view.board.vertices.items():
+    if vertex.owner != view.player_id:
+        continue
+    print(vertex_id, vertex.building, (vertex.x, vertex.y))
+    for tile_id in vertex.tiles:
+        tile = view.board.tiles[tile_id]
+        print(tile_id, tile.resource, tile.number, tile.has_robber)
+    if vertex.port is not None:
+        port = view.board.ports[vertex.port]
+        print('Port:', port.type)
+```
+
+To walk from a corner to its neighboring corners and roads:
+
+```python
+# vertex_id is an existing key in view.board.vertices.
+vertex = view.board.vertices[vertex_id]
+neighbor_vertices = [view.board.vertices[v] for v in vertex.neighbors]
+for edge_id in vertex.edges:
+    edge = view.board.edges[edge_id]
+    other_id = next(v for v in edge.vertices if v != vertex_id)
+    other_vertex = view.board.vertices[other_id]
+    print(edge_id, edge.owner, other_id, other_vertex.building)
+```
+
+### Connecting board locations to building actions
+
+Use `options` as the source of legal build locations. An empty corner or road alone does not mean you can build there: distance, connection, resources, piece supplies, and the current decision phase also matter. The engine has already checked these rules for each offered option.
+
+Inside `choose_action`, you can inspect the location attached to an option:
+
+```python
+for action in options:
+    if action.type in ('PLACE_SETTLEMENT', 'BUILD_SETTLEMENT', 'BUILD_CITY'):
+        vertex = view.board.vertices[action.vertex]
+        adjacent_tiles = [view.board.tiles[t] for t in vertex.tiles]
+        # Inspect vertex and adjacent_tiles using your own decision logic.
+    elif action.type in ('PLACE_ROAD', 'BUILD_ROAD', 'BUILD_FREE_ROAD'):
+        edge = view.board.edges[action.edge]
+        endpoints = [view.board.vertices[v] for v in edge.vertices]
+        # Inspect edge and endpoints using your own decision logic.
+```
+
+Once your logic picks a location, return its offered action. This helper demonstrates matching an ID without supplying a strategy:
+
+```python
+def offered_build(options, action_type, location_id):
+    field = 'edge' if action_type in (
+        'PLACE_ROAD', 'BUILD_ROAD', 'BUILD_FREE_ROAD'
+    ) else 'vertex'
+    return next((action for action in options
+                 if action.type == action_type
+                 and action[field] == location_id), None)
+
+# Inside choose_action, after your logic chooses desired_vertex_id:
+action = offered_build(options, 'BUILD_SETTLEMENT', desired_vertex_id)
+if action is not None:
+    return action
+# Otherwise continue choosing another legal option.
+```
+
+A settlement action has the shape `{'type': 'BUILD_SETTLEMENT', 'vertex': vertex_id}`; a road uses `{'type': 'BUILD_ROAD', 'edge': edge_id}`. Do not send a vertex object, tile ID, coordinates, owner, or cost. During setup use the offered `PLACE_SETTLEMENT` / `PLACE_ROAD` actions instead. Each returned action makes one change; the next callback receives a fresh snapshot and updated options. You cannot edit `view.board` to place pieces yourself.
+
 ## Actions
 
 Usually return one of `options` unchanged. Locations and resource combinations are concrete legal choices, refreshed after every action. Only `TRADE`, `COUNTER` and `DISCARD` are templates you fill in. Extra fields and unavailable actions are rejected.
