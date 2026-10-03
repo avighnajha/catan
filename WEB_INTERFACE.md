@@ -58,3 +58,20 @@ npm run test:browser
 ```
 
 Browser tests start an isolated server on port 8011 with temporary storage. They cover playback and seeking, desktop/mobile layouts, independent viewers, a four-participant room, text escaping/error recovery, and a complete geometry fixture. The fixture is synthetic and used only to verify rendering; it is not presented as a simulator-generated game. Screenshots and traces are written under `test-results/`.
+# Private practice rooms and simulation opponents
+
+Room creation offers Public or Private visibility. Private rooms and their match
+metadata, state snapshots, and replay downloads are accessible only to the
+creator's account; guessed links return 404 to other visitors. Legacy rooms stay
+public. Access metadata is persisted in the additive `room_access` SQLite table.
+
+Room creators can fill empty seats with Easy, Medium, or Hard simulation players,
+change their difficulty, or remove them before a match starts. Human seats remain
+controlled by their account owner. Built-in seats are ready automatically.
+
+Valid saved uploads have a **Test your player** button. **Save and test your
+player** in the upload dialog also opens this flow. Select a difficulty to create
+a private room with your player and three opponents; choose the seed and start
+the match from its lobby. The opponents use the same Player API and hidden-hand
+restrictions as uploads. Compiled artifacts and build details are documented in
+`src/platform/opponents/README.md`.

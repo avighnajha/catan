@@ -14,13 +14,13 @@ async function register(page,name,email){
   await page.getByRole('button',{name:'Create account',exact:true}).click();
   await expect(page.locator('#accountName')).toHaveText(name);
 }
-async function uploadBot(page,bot){
+async function uploadBot(page,bot,testAfterSaving=false){
   await page.goto('/#bots');
   await page.getByRole('button',{name:'+ Add player version',exact:true}).click();
   await page.getByRole('textbox',{name:'Player name',exact:true}).fill(bot);
   await page.getByRole('textbox',{name:'Version',exact:true}).fill('v1');
   await page.getByRole('textbox',{name:'Or paste code',exact:true}).fill(playerCode);
-  await page.getByRole('button',{name:'Save player version',exact:true}).click();
+  await page.getByRole('button',{name:testAfterSaving?'Save and test your player':'Save player version',exact:true}).click();
   await expect(page.getByRole('heading',{name:bot,exact:true})).toBeVisible();
 }
 test('watch the sample, scrub, replay independently, and display responsive results',async({page,context})=>{
@@ -109,6 +109,33 @@ test('four participants select a saved bot, ready up and launch a recorded room 
     await page.goto(url);
     await expect(page.getByRole('button',{name:'Watch match →',exact:true})).toBeVisible();
   }finally{for(const ctx of contexts)await ctx.close();}
+});
+
+test('test your player creates a private room with configurable simulation opponents',async({page})=>{
+  test.setTimeout(120000);
+  const suffix=Date.now().toString(36);
+  await page.goto('/');
+  await register(page,`Tester-${suffix}`,`tester-${suffix}@example.com`);
+  await uploadBot(page,`Test player ${suffix}`);
+  await page.getByRole('button',{name:'Test your player',exact:true}).click();
+  await page.getByRole('button',{name:'Create private test room',exact:true}).click();
+  await expect(page.locator('[data-builtin-seat]')).toHaveCount(3);
+  await expect(page.locator('#app')).toContainText('Private room');
+  await page.locator('[data-builtin-seat="1"]').selectOption('hard');
+  await expect(page.locator('[data-builtin-seat="1"]')).toHaveValue('hard');
+  await page.getByRole('button',{name:'Simulate match →',exact:true}).click();
+  await expect(page.locator('#timeline')).toBeVisible({timeout:60000});
+  await expect(page.locator('#players')).toContainText('Hard bot');
+});
+
+test('upload dialog can save and test a player directly',async({page})=>{
+  const suffix=Date.now().toString(36);
+  await page.goto('/');
+  await register(page,`UploadTester-${suffix}`,`upload-${suffix}@example.com`);
+  await uploadBot(page,`Upload test ${suffix}`,true);
+  await expect(page.getByRole('button',{name:'Create private test room',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Create private test room',exact:true}).click();
+  await expect(page.locator('[data-builtin-seat]')).toHaveCount(3);
 });
 
 test('user names are rendered as text, and missing matches have a recoverable error',async({page,request})=>{

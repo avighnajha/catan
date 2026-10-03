@@ -1,6 +1,8 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
+!src/platform/opponents/*.pyc
+.private-opponents/
 *$py.class
 
 # C extensions

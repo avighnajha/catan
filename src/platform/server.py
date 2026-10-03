@@ -32,6 +32,8 @@ from .recording import RecordingSimulator
 from .replay_store import ReplayStore
 from .room_service import RoomService
 from .auth import AuthService
+from .builtin_players import catalog as builtin_catalog, package as builtin_package
+from .database import RoomAccess
 
 DATABASE_URL = os.getenv("CATAN_DB_URL", "sqlite:///catan_platform.db")
 default_replays = (DATABASE_URL.removeprefix("sqlite:///") + ".replays"
@@ -89,6 +91,16 @@ class StartGameRequest(BaseModel):
     seed: int = Field(default=42, ge=0, le=2**31 - 1)
 
 
+class BuiltinSeatRequest(BaseModel):
+    seat: int = Field(ge=0, le=3)
+    difficulty: str | None = None
+
+
+class TestPlayerRequest(BaseModel):
+    bot_id: str
+    difficulty: str = 'medium'
+
+
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=2, max_length=40)
     email: str = Field(max_length=254)
@@ -138,12 +150,41 @@ def package_data(package):
 
 
 def require_bot(bot_id, user=None):
-    package = bot_registry.get_bot(bot_id) if bot_id else None
+    package = (builtin_package(bot_id) or bot_registry.get_bot(bot_id)) if bot_id else None
     if package is None or not package.validated:
         raise ValueError("Select an existing, valid bot version")
     if not owns_bot(package, user):
         raise HTTPException(403, "That bot belongs to another account")
     return package
+
+
+def room_access(room_id):
+    with room_service.db_manager as session:
+        row = session.get(RoomAccess, room_id)
+        return {'owner_id': row.owner_id, 'private': row.private} if row else {'owner_id': None, 'private': False}
+
+
+def visible(access, user):
+    return not access.get('private') or bool(user and user['user_id'] == access.get('owner_id'))
+
+
+def check_room(room_id, request):
+    access = room_access(room_id)
+    if not visible(access, current_user(request, required=False)):
+        raise HTTPException(404, 'The requested room was not found')
+    return access
+
+
+def check_game(game_id, request):
+    metadata = store.metadata(game_id)
+    if not visible(metadata, current_user(request, required=False)):
+        raise HTTPException(404, 'The requested match was not found')
+    return metadata
+
+
+def save_access(room_id, user, private):
+    with room_service.db_manager as session:
+        session.add(RoomAccess(room_id=room_id, owner_id=user['user_id'], private=private))
 
 
 @app.post("/auth/register")
@@ -196,7 +237,8 @@ def _run_match(metadata, packages):
         store.save_metadata(metadata)
         job={'metadata':metadata,'replay_directory':str(store.directory.resolve()),
              'catalog_path':str(Path(store.catalog_path).resolve()),
-             'packages':[{'code':p.bot_code if p.use_sandbox else None} if p else None for p in packages]}
+             'packages':[{'builtin': p.metadata['builtin']} if p.metadata.get('builtin') else
+                         {'code':p.bot_code if p.use_sandbox else None} for p in packages]}
         with tempfile.TemporaryDirectory(prefix='catan_match_') as directory:
             path=Path(directory)/'job.json';path.write_text(json.dumps(job),encoding='utf-8')
             process=subprocess.Popen([sys.executable,'-m','src.platform.match_worker',str(path)],
@@ -225,7 +267,8 @@ def launch(seed, participants, packages, room_id=None, room_name=None):
     metadata = {"game_id": game_id, "seed": seed, "room_id": room_id, "room_name": room_name,
                 "players": [p["name"] for p in participants], "participants": participants,
                 "status": "queued", "created_at": now(), "winner": None, "replay_available": False}
-    metadata["implementation_hashes"] = [hashlib.sha256(p.bot_code.encode()).hexdigest() for p in packages]
+    metadata.update(room_access(room_id) if room_id else {'private': False, 'owner_id': None})
+    metadata["implementation_hashes"] = [p.metadata.get('sha256') or hashlib.sha256(p.bot_code.encode()).hexdigest() for p in packages]
     store.save_metadata(metadata)
     workers.submit(_run_match, dict(metadata), packages)
     return {"game_id": game_id, "room_id": room_id}
@@ -262,17 +305,19 @@ def demo_replay():
 
 
 @app.get("/games")
-def list_games():
-    return {"games": store.list_games()}
+def list_games(request: Request):
+    user = current_user(request, required=False)
+    return {"games": [g for g in store.list_games() if visible(g, user)]}
 
 
 @app.get("/games/{game_id}")
-def get_game_metadata(game_id: str):
-    return store.metadata(game_id)
+def get_game_metadata(game_id: str, request: Request):
+    return check_game(game_id, request)
 
 
 @app.get("/game/{game_id}/replay")
-def replay(game_id: str):
+def replay(game_id: str, request: Request):
+    check_game(game_id, request)
     recording = store.replay(game_id)
     if recording is None:
         raise HTTPException(409, "This run has no saved replay yet. Check its status on Matches.")
@@ -280,39 +325,55 @@ def replay(game_id: str):
 
 
 @app.get("/game/{game_id}/state")
-def state(game_id: str, player: str | None = None):
+def state(game_id: str, request: Request, player: str | None = None):
     if player is not None:
         raise HTTPException(403, "Private player views are not available in this local viewer.")
-    return replay(game_id)["frames"][-1]["state"]
+    return replay(game_id, request)["frames"][-1]["state"]
 
 
 @app.get("/rooms")
-def list_rooms():
-    return {"rooms": room_service.list_rooms()}
+def list_rooms(request: Request):
+    user = current_user(request, required=False)
+    rooms = []
+    for room in room_service.list_rooms():
+        access = room_access(room['room_id'])
+        if visible(access, user):
+            room.update(access)
+            rooms.append(room)
+    return {"rooms": rooms}
 
 
 @app.get("/rooms/{room_id}")
-def get_room(room_id: str):
+def get_room(room_id: str, request: Request):
+    access = check_room(room_id, request)
     room = room_service.get_room(room_id).to_dict()
+    room.update(access)
     matches = [g for g in store.list_games() if g.get("room_id") == room_id]
     room["game"] = matches[0] if matches else None
     return {"room": room}
 
 
 @app.post("/rooms")
-def create_room(request: Request, room_name: str = "New room", created_by: str = "Player"):
+def create_room(request: Request, room_name: str = "New room", created_by: str = "Player", private: bool = False):
     user = current_user(request)
     if user:
         created_by = user["username"]
     if not room_name.strip() or not created_by.strip() or max(len(room_name), len(created_by)) > 80:
         raise ValueError("Room and player names must contain 1–80 characters")
     with mutation_lock:
-        return {"room": room_service.create_room(room_name.strip(), created_by.strip(),
-                                                  user["user_id"] if user else None).to_dict()}
+        if private and not user:
+            raise HTTPException(401, 'Sign in to create a private room')
+        room = room_service.create_room(room_name.strip(), created_by.strip(), user['user_id'] if user else None)
+        if user:
+            save_access(room.room_id, user, private)
+        result = room.to_dict()
+        result.update(room_access(room.room_id))
+        return {'room': result}
 
 
 @app.post("/rooms/{room_id}/join")
 def join_room(room_id: str, payload: RoomJoinRequest, request: Request):
+    check_room(room_id, request)
     user = current_user(request)
     player_name = user["username"] if user else payload.player_name.strip()
     if not player_name:
@@ -324,6 +385,7 @@ def join_room(room_id: str, payload: RoomJoinRequest, request: Request):
 
 @app.post("/rooms/{room_id}/ready")
 def set_room_ready(room_id: str, payload: RoomReadyRequest, request: Request):
+    check_room(room_id, request)
     user = current_user(request)
     player_name = user["username"] if user else payload.player_name
     with mutation_lock:
@@ -331,6 +393,8 @@ def set_room_ready(room_id: str, payload: RoomReadyRequest, request: Request):
         seat = next((s for s in room.seats if s.player_name == player_name), None)
         if seat is None:
             raise ValueError("Join this room first")
+        if user and seat.user_id != user['user_id']:
+            raise HTTPException(403, 'This seat belongs to another player')
         if payload.ready:
             require_bot(seat.to_dict()["bot_runner"], user)
         return {"room": room_service.set_ready(room_id, player_name, payload.ready).to_dict()}
@@ -338,9 +402,14 @@ def set_room_ready(room_id: str, payload: RoomReadyRequest, request: Request):
 
 @app.post("/rooms/{room_id}/attach-bot")
 def attach_bot(room_id: str, payload: AttachBotRequest, request: Request):
+    check_room(room_id, request)
     user = current_user(request)
     player_name = user["username"] if user else payload.player_name
     with mutation_lock:
+        room = room_service.get_room(room_id)
+        seat = next((s for s in room.seats if s.player_name == player_name), None)
+        if user and (seat is None or seat.user_id != user['user_id']):
+            raise HTTPException(403, 'Join this room to select your player')
         requested_id = payload.bot_name if bot_registry.get_bot(payload.bot_name) else f"{payload.bot_name}-{payload.bot_version}"
         package = require_bot(requested_id, user)
         reference = BotRunner(bot_id=package.bot_id, name=package.name, version=package.version)
@@ -349,6 +418,7 @@ def attach_bot(room_id: str, payload: AttachBotRequest, request: Request):
 
 @app.post("/rooms/{room_id}/start-game")
 def start_room_game(room_id: str, payload: StartGameRequest, request: Request):
+    check_room(room_id, request)
     user = current_user(request)
     with mutation_lock:
         room = room_service.get_room(room_id)
@@ -369,6 +439,64 @@ def start_room_game(room_id: str, payload: StartGameRequest, request: Request):
 def list_bots(request: Request):
     user = current_user(request)
     return {"bots": bot_registry.list_bots(user["user_id"] if user else None)}
+
+
+@app.get('/builtin-bots')
+def builtin_bots():
+    return {'bots': builtin_catalog()}
+
+
+def update_builtin(room_id, seat_index, difficulty):
+    room = room_service.get_room(room_id)
+    if room.status != 'waiting':
+        raise ValueError('This room has already started')
+    seat = room.seats[seat_index]
+    if seat.player_name and not str(seat.to_dict()['bot_runner']).startswith('builtin-'):
+        raise ValueError('Only empty or built-in seats can be changed')
+    if difficulty is None:
+        seat.player_name = None
+        seat.bot_runner = None
+        seat.ready = False
+    else:
+        package = builtin_package(f'builtin-{difficulty}-v1')
+        if package is None:
+            raise ValueError('Choose easy, medium, or hard')
+        seat.player_name = f'{package.name} {seat_index + 1}'
+        seat.bot_runner = package.bot_id
+        seat.ready = True
+    seat.user_id = None
+    room_service.room_repository.update_room_seats(room_id, [s.to_dict() for s in room.seats])
+    return room
+
+
+@app.post('/rooms/{room_id}/builtin-bot')
+def add_builtin(room_id: str, payload: BuiltinSeatRequest, request: Request):
+    user = current_user(request)
+    access = check_room(room_id, request)
+    if not user or access['owner_id'] != user['user_id']:
+        raise HTTPException(403, 'Only the room creator can manage built-in seats')
+    with mutation_lock:
+        return {'room': update_builtin(room_id, payload.seat, payload.difficulty).to_dict()}
+
+
+@app.post('/bots/test')
+def test_player(payload: TestPlayerRequest, request: Request):
+    user = current_user(request)
+    if not user:
+        raise HTTPException(401, 'Sign in to test your player')
+    with mutation_lock:
+        package = require_bot(payload.bot_id, user)
+        if builtin_package(f'builtin-{payload.difficulty}-v1') is None:
+            raise ValueError('Choose easy, medium, or hard')
+        room = room_service.create_room(f'Test {package.name}', user['username'], user['user_id'])
+        save_access(room.room_id, user, True)
+        room_service.attach_bot(room.room_id, user['username'], BotRunner(bot_id=package.bot_id, name=package.name, version=package.version))
+        room_service.set_ready(room.room_id, user['username'], True)
+        for index in range(1, 4):
+            room = update_builtin(room.room_id, index, payload.difficulty)
+        result = room.to_dict()
+        result.update(room_access(room.room_id))
+        return {'room': result}
 
 
 @app.post("/bots/upload")

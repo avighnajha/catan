@@ -8,3 +8,5 @@
 .feed{position:relative}
 
 .resource-hand{display:flex;flex-wrap:wrap;gap:4px;margin:9px 0 4px}.resource-hand .resource-card{min-width:34px;font-size:.48rem;box-shadow:none}.resource-hand .resource-card b{font-size:.85rem}.resource-total{font-size:9px;color:var(--muted);margin-bottom:8px}.resource-card.wood{background:#7ea477}.resource-card.sheep{background:#acd18d}.resource-card.wheat{background:#dfc965}.trade-overlay.animate .trade-give{animation:cards-right 2.3s ease both}.trade-overlay.animate .trade-receive{animation:cards-left 2.3s ease both}@keyframes cards-right{0%,12%{transform:translateX(-42px);opacity:0}35%,72%{transform:translateX(18px);opacity:1}100%{transform:translateX(42px);opacity:0}}@keyframes cards-left{0%,12%{transform:translateX(42px);opacity:0}35%,72%{transform:translateX(-18px);opacity:1}100%{transform:translateX(-42px);opacity:0}}
+
+.brand-logo{display:block;flex-shrink:0;width:42px;height:42px}@media(max-width:720px){.brand-logo{width:34px;height:34px}}

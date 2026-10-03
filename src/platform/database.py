@@ -167,6 +167,14 @@ class Room(Base):
         }
 
 
+class RoomAccess(Base):
+    """Additive access metadata; legacy rooms remain public."""
+    __tablename__ = 'room_access'
+    room_id = Column(String, primary_key=True)
+    owner_id = Column(String, nullable=False)
+    private = Column(Boolean, nullable=False, default=False)
+
+
 class DatabaseManager:
     """Manager for database operations."""
     

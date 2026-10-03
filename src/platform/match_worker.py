@@ -20,6 +20,10 @@ def run_job(job):
     try:
         players={}
         for pid,package in zip(PlayerId.all_players(),job['packages']):
+            if package and package.get('builtin'):
+                from .builtin_players import load_player
+                players[pid] = load_player(package['builtin'])
+                continue
             if not package or not package.get('code'):
                 raise ValueError('Every seat must provide a validated Player implementation')
             player=ProcessPlayer(package['code'])

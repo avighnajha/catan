@@ -6,7 +6,9 @@ test-results
 playwright-report
 __pycache__
 *.py[cod]
+!src/platform/opponents/*.pyc
 *.db
 *.db.replays
 *.log
 .env
+.private-opponents/
