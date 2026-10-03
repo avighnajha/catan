@@ -29,7 +29,7 @@ class MyPlayer(Player):
         pass
 ```
 
-Use `examples/my_player.py` for a complete runnable baseline that handles all decisions. `src/player/example.py` contains its simple deterministic strategy. Neither is intended as a competitive strategy.
+Use `examples/my_player.py` for a runnable interface demonstration. It shows all four callbacks, persistent memory, selecting an offered action, and filling a required discard. It mechanically chooses the first mandatory option, declines trades, and ends its turn when possible. It does not evaluate locations, plan builds, or try to win; replace `choose_action` with your own logic. The SDK download contains no strategic example player.
 
 ## Methods and ordering
 
@@ -130,6 +130,8 @@ An event contains `sequence`, `type`, `player_id`, `turn_number`, and `data`. Gl
 You may ignore events or maintain any inference model you like. Opponent hand contents are never supplied directly. The public replay reveals the winner's score at completion; other hidden VP remain private.
 
 ## Running and validating
+
+The SDK ZIP contains the interface and starter, not the simulator. Upload the starter to test it using the website's **Save and test your player** flow. The commands below require a checkout of the full Catan Simulator repository and its dependencies.
 
 ```powershell
 python -m src.simulator.run --seed 42 --replay match.json

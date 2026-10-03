@@ -564,7 +564,7 @@ def player_sdk():
     output=io.BytesIO()
     with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as archive:
         for path in ('src/__init__.py','src/player/__init__.py','src/player/interface.py',
-                     'src/player/example.py','examples/my_player.py','PLAYER_API.md'):
+                     'examples/my_player.py','PLAYER_API.md'):
             archive.write(root/path,path)
     return Response(output.getvalue(),media_type='application/zip',
                     headers={'Content-Disposition':'attachment; filename="catan-player-sdk.zip"'})
