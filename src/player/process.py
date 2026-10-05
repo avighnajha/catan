@@ -47,7 +47,7 @@ def terminate_tree(process):
 
 
 class ProcessPlayer(Player):
-    def __init__(self,code,timeout=2.0):
+    def __init__(self,code,timeout=2.0,trusted_local=False):
         self.timeout=timeout
         self.closed=False
         self.job=None
@@ -59,11 +59,13 @@ class ProcessPlayer(Player):
         env={k:v for k,v in os.environ.items() if k in ('PATH','SYSTEMROOT','WINDIR','TEMP','TMP','LANG')}
         env['PYTHONPATH']=str(Path(__file__).resolve().parents[2])
         env['PYTHONIOENCODING']='utf-8'
-        self.process=subprocess.Popen([sys.executable,'-u','-m','src.player.host',str(source)],
+        command=[sys.executable,'-u','-m','src.player.host',str(source)]
+        if trusted_local: command.append('--trusted-local')
+        self.process=subprocess.Popen(command,
             cwd=self.temp.name,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-            creationflags=(subprocess.CREATE_NO_WINDOW | 0x4) if os.name=='nt' else 0,
+            creationflags=(subprocess.CREATE_NO_WINDOW | (0 if trusted_local else 0x4)) if os.name=='nt' else 0,
             start_new_session=os.name!='nt')
-        if os.name=='nt':
+        if os.name=='nt' and not trusted_local:
             try:
                 from .windows_job import WindowsJob
                 self.job=WindowsJob(self.process)

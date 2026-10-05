@@ -37,6 +37,7 @@ def test_sdk_archive_contains_only_the_interface_and_minimal_starter():
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         assert 'src/player/example.py' not in archive.namelist()
         assert 'src/player/interface.py' in archive.namelist()
+        assert 'LOCAL_DEVELOPMENT.md' in archive.namelist()
         starter = archive.read('examples/my_player.py').decode()
         assert 'class MyPlayer(Player):' in starter
         assert 'ExamplePlayer' not in starter

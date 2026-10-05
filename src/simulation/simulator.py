@@ -31,8 +31,10 @@ class PlayerFailure(RuntimeError):
 class Simulator(RulesEngine):
     def __init__(self, seed=None, config=None):
         self.config = config or GameConfig()
-        if any(type(n) is not int or n<=0 for n in (self.config.max_turns,self.config.max_decisions,self.config.max_decisions_per_turn)):
-            raise ValueError('Simulation limits must be positive integers')
+        if type(self.config.max_turns) is not int or self.config.max_turns < 0:
+            raise ValueError('max_turns must be a nonnegative integer')
+        if any(type(n) is not int or n<=0 for n in (self.config.max_decisions,self.config.max_decisions_per_turn)):
+            raise ValueError('Decision limits must be positive integers')
         self.rng = SeededRng(seed)
         self.board_geometry = BoardGeometry()
         s = self.game_state = GameState()
@@ -185,11 +187,14 @@ class Simulator(RulesEngine):
 
     execute_action=apply_action
 
+    def limit_reached(self):
+        return (self.decision_number>=self.config.max_decisions or self.turn_decisions>=self.config.max_decisions_per_turn
+                or (not self.stage.startswith('SETUP') and self.game_state.turn_state.turn_number>self.config.max_turns))
+
     def step(self):
         if not self.started: self.start_game()
         if self.result: return self.result
-        if (self.decision_number>=self.config.max_decisions or self.turn_decisions>=self.config.max_decisions_per_turn
-                or self.game_state.turn_state.turn_number>self.config.max_turns):
+        if self.limit_reached():
             self._finish('stopped','Configured simulation limit reached');return self.result
         pid=self.acting_player()
         try:

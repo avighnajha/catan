@@ -11,7 +11,7 @@ MAX_MESSAGE = 2_000_000
 
 
 def main():
-    if os.name!='nt':
+    if os.name!='nt' and '--trusted-local' not in sys.argv[2:]:
         import resource
         resource.setrlimit(resource.RLIMIT_AS,(256*1024*1024,256*1024*1024))
         resource.setrlimit(resource.RLIMIT_CPU,(30,30))

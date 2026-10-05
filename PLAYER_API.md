@@ -210,6 +210,8 @@ You may ignore events or maintain any inference model you like. Opponent hand co
 
 ## Running and validating
 
+See **[LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md)** (also included in the SDK ZIP) for installation, the `catansim` CLI, coloured terminal boards, batch evaluation, and the local decision-by-decision Python environment for training. None of these tools calls the hosted server.
+
 The SDK ZIP contains the interface and starter, not the simulator. Upload the starter to test it using the website's **Save and test your player** flow. The commands below require a checkout of the full Catan Simulator repository and its dependencies.
 
 ```powershell

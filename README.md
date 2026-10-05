@@ -19,6 +19,8 @@ See [Player API](PLAYER_API.md), [Project structure and database](PROJECT_STRUCT
 
 Run headlessly with `python -m src.simulator.run --seed 42 --replay match.json`. The web app also provides `/player-sdk.zip` with the player SDK and an example implementation.
 
+For the local `catansim` CLI, coloured terminal boards, batch evaluation and the decision-by-decision Python training environment, see [Local development](LOCAL_DEVELOPMENT.md). Install from this checkout with `python -m pip install -e .`; no hosted backend is needed.
+
 ## Tests
 
 ```powershell
