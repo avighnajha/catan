@@ -33,6 +33,45 @@ Use `examples/my_player.py` for a runnable interface demonstration. It shows all
 
 ## Methods and ordering
 
+### SDK types and editor help
+
+The ZIP includes `src/player/types.py`; common types are also exported from `src.player`. No extra dependency is needed. These are type hints for autocomplete and optional static checking, not new runtime objects or a strategy. Existing unannotated players and both mapping/attribute access continue to work.
+
+Use `PlayerView`, `Board`, `Tile`, `Vertex`, `Edge`, `Port`, `SelfState`, `OpponentState`, `TurnState`, `TradeState`, `PlayerEvent`, and `GameResult` for observations and callbacks. Snapshot types describe read-only properties, so `view.board.vertices[id].owner` is typed. `Resource`, `DevelopmentCard`, `BuildingType`, `PortType`, `PlayerId` and location ID aliases describe the public strings; they are not simulator enums. OpponentState deliberately has no exact resources map.
+
+`ActionOption` describes offered actions, including the unfilled `TradeTemplate`, `CounterTemplate`, and `DiscardTemplate`. `Action` describes what you return, including filled `TradeAction`, `CounterAction`, and `DiscardAction`. Individual types such as `BuildRoadAction` and `BuildSettlementAction` describe their required fields. Action schemas use Python `TypedDict`: use **key access** for static checking, allowing your editor to narrow the fields from the `type` string. Attribute access still works on offered actions at runtime, but is not described by these action hints. Constructed ordinary dictionaries use key access only.
+
+```python
+from collections.abc import Sequence
+from src.player import PlayerView, ActionOption, BuildSettlementAction
+
+def first_settlement_option(
+    view: PlayerView, options: Sequence[ActionOption]
+) -> BuildSettlementAction | None:
+    for action in options:
+        if action['type'] == 'BUILD_SETTLEMENT':
+            vertex = view.board.vertices[action['vertex']]
+            # Your editor knows vertex.tiles, vertex.owner, etc.
+            return action
+    return None
+```
+
+The annotated `examples/my_player.py` shows all callback signatures. Actions are still validated by the engine; hints do not make an unavailable action legal. Snapshot mapping access remains supported, but attribute access gives more precise field hints.
+
+For common event payloads, `ResourcesProducedData`, `DiceRolledData`, and `TradeCompletedData` are provided. The general `PlayerEvent.data` is a mapping because its fields depend on the event type. For optional static checking you can use `typing.cast` after checking `event.type`:
+
+```python
+from typing import cast
+from src.player import PlayerEvent, TradeCompletedData
+
+def describe_trade(event: PlayerEvent) -> None:
+    if event.type == 'TradeCompleted':
+        data = cast(TradeCompletedData, event.data)
+        print(event.player_id, data['give'], data['responder'], data['receive'])
+```
+
+`cast` only informs a type checker; it does not copy or validate the payload. The event table below documents other payloads. You can optionally install a checker with `python -m pip install mypy` and run `python -m mypy examples/my_player.py --follow-imports=silent`. A `py.typed` marker is included in both the ZIP and installed package so editors can discover the annotations.
+
 - `choose_action(view, options)` is the only decision method and must be overridden.
 - `on_event(event)` is invoked separately for every visible event. The default is a no-op. Its return value is ignored.
 - `on_game_start(view)` and `on_game_end(result)` are optional no-op lifecycle hooks.

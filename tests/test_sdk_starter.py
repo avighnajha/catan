@@ -38,6 +38,8 @@ def test_sdk_archive_contains_only_the_interface_and_minimal_starter():
         assert 'src/player/example.py' not in archive.namelist()
         assert 'src/player/interface.py' in archive.namelist()
         assert 'LOCAL_DEVELOPMENT.md' in archive.namelist()
+        assert 'src/player/types.py' in archive.namelist()
+        assert 'src/player/py.typed' in archive.namelist()
         starter = archive.read('examples/my_player.py').decode()
         assert 'class MyPlayer(Player):' in starter
         assert 'ExamplePlayer' not in starter

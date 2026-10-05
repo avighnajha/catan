@@ -15,4 +15,5 @@ catansim = "src.simulator.cli:main"
 include = ["src*"]
 
 [tool.setuptools.package-data]
+"src.player" = ["py.typed"]
 "src.platform" = ["opponents/*.pyc"]
