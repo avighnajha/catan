@@ -5,6 +5,7 @@ import inspect
 import json
 import sys
 import os
+import traceback
 from .interface import Player, freeze, thaw, PROTOCOL_VERSION
 
 MAX_MESSAGE = 2_000_000
@@ -46,7 +47,10 @@ def main():
             if len(encoded.encode())>MAX_MESSAGE: raise ValueError('Response too large')
         except Exception as error:
             # Do not publish exception messages, which may contain private state.
-            encoded=json.dumps({'id':request['id'],'error':type(error).__name__})
+            failure={'id':request['id'],'error':type(error).__name__}
+            if '--trusted-local' in sys.argv[2:]:
+                failure.update(detail=str(error),traceback=traceback.format_exc())
+            encoded=json.dumps(failure)
         output.write(encoded+'\n');output.flush()
 
 

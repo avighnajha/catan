@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import codecs
 from .interface import Player, thaw
 
 MAX_MESSAGE=2_000_000
@@ -47,22 +48,28 @@ def terminate_tree(process):
 
 
 class ProcessPlayer(Player):
-    def __init__(self,code,timeout=2.0,trusted_local=False):
+    def __init__(self,code,timeout=2.0,trusted_local=False,log_stream=None,source_path=None):
         self.timeout=timeout
+        self.trusted_local=trusted_local
+        self.log_stream=log_stream
         self.closed=False
         self.job=None
         self.temp=tempfile.TemporaryDirectory(prefix='catan_player_')
         source=Path(self.temp.name)/'implementation.py'
         source.write_text(code,encoding='utf-8')
+        if source_path is not None:
+            if not trusted_local: raise ValueError('source_path is for trusted local execution only')
+            source=Path(source_path).resolve()
         self.messages=queue.Queue(maxsize=2)
         self.counter=0
         env={k:v for k,v in os.environ.items() if k in ('PATH','SYSTEMROOT','WINDIR','TEMP','TMP','LANG')}
         env['PYTHONPATH']=str(Path(__file__).resolve().parents[2])
+        if trusted_local: env['PYTHONPATH']+=os.pathsep+str(source.parent)
         env['PYTHONIOENCODING']='utf-8'
         command=[sys.executable,'-u','-m','src.player.host',str(source)]
         if trusted_local: command.append('--trusted-local')
         self.process=subprocess.Popen(command,
-            cwd=self.temp.name,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+            cwd=None if trusted_local else self.temp.name,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
             creationflags=(subprocess.CREATE_NO_WINDOW | (0 if trusted_local else 0x4)) if os.name=='nt' else 0,
             start_new_session=os.name!='nt')
         if os.name=='nt' and not trusted_local:
@@ -73,7 +80,8 @@ class ProcessPlayer(Player):
                 self.process.kill();self.process.wait();self.temp.cleanup();raise
         self.diagnostics=bytearray()
         threading.Thread(target=self._read,daemon=True).start()
-        threading.Thread(target=self._drain_errors,daemon=True).start()
+        self.error_thread=threading.Thread(target=self._drain_errors,daemon=True)
+        self.error_thread.start()
         try:
             hello=self._receive()
             if hello!={'ready':True,'protocol_version':1}: raise RuntimeError('Player handshake failed')
@@ -93,18 +101,25 @@ class ProcessPlayer(Player):
             except queue.Full: pass
 
     def _drain_errors(self):
+        decoder=codecs.getincrementaldecoder('utf-8')(errors='replace')
         while True:
-            try: data=self.process.stderr.read(4096)
+            try: data=self.process.stderr.read1(4096)
             except (ValueError,OSError): return
             if not data: return
             room=max(0,16384-len(self.diagnostics))
             self.diagnostics.extend(data[:room])
+            if self.log_stream is not None:
+                try:
+                    self.log_stream.write(decoder.decode(data));self.log_stream.flush()
+                except (OSError,ValueError): pass
 
     def _receive(self):
         try: item=self.messages.get(timeout=self.timeout)
         except queue.Empty:
             self.close();raise TimeoutError('Player callback timed out')
-        if not isinstance(item,dict) or 'error' in item: raise RuntimeError('Player callback failed')
+        if not isinstance(item,dict) or 'error' in item:
+            detail=(item.get('traceback') or item.get('detail') or item.get('error')) if isinstance(item,dict) else ''
+            raise RuntimeError(f'Player callback failed: {detail}' if self.trusted_local else 'Player callback failed')
         return item
 
     def _request(self,method,*args):
@@ -134,6 +149,7 @@ class ProcessPlayer(Player):
         self.closed=True
         if self.job: self.job.close()
         terminate_tree(self.process)
+        self.error_thread.join(timeout=1)
         for pipe in (self.process.stdin,self.process.stdout,self.process.stderr):
             try: pipe.close()
             except OSError: pass

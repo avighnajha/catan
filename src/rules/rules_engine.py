@@ -137,7 +137,11 @@ class RulesEngine:
         if not any(o['type']==kind for o in options): raise ValueError('Action not available')
         if kind in ('TRADE','COUNTER'):
             allowed={'type','give','receive','recipients'} if kind=='TRADE' else {'type','give','receive'}
-            if set(action)!=allowed: raise ValueError('Invalid offer fields')
+            if set(action)!=allowed:
+                missing=sorted(allowed-set(action));extra=sorted(set(action)-allowed)
+                raise ValueError(f'{kind} requires {", ".join(sorted(allowed))}; missing {missing}; unexpected {extra}. '
+                                 'TRADE and COUNTER are templates: fill in give/receive resource maps '
+                                 'and TRADE recipients, or choose another offered action.')
             give=self._resources(action['give']);receive=self._resources(action['receive'])
             if set(give)&set(receive): raise ValueError('Cannot exchange a resource for itself')
             if not self._affords(pid,give): raise ValueError('Offer exceeds own resources')
@@ -147,7 +151,7 @@ class RulesEngine:
                 if any(PlayerId(r)==pid for r in recipients): raise ValueError('Cannot trade with self')
                 for r in recipients: PlayerId(r)
         elif kind=='DISCARD':
-            if set(action)!={'type','resources'}: raise ValueError('Discard requires resources')
+            if set(action)!={'type','resources'}: raise ValueError('DISCARD requires only type and resources; replace the offered count with your resource map')
             resources=self._resources(action['resources'])
             if sum(resources.values())!=self.player(pid).get_total_resources()//2 or not self._affords(pid,resources):
                 raise ValueError('Incorrect discard')

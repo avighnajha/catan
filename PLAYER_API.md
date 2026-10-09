@@ -262,7 +262,9 @@ Zero `--player` arguments use four example players. Four files use persistent pr
 
 The web upload verifies import, one subclass, protocol version, construction, lifecycle/event handling and an initial legal decision. This smoke test cannot prove the strategy handles every later situation.
 
-Process callbacks default to a two-second limit. Messages are limited to 2 MB and diagnostic retention to 16 KB. Windows Job Objects cap each submitted player at one process, 256 MB combined memory and 30 seconds of CPU over its lifetime; closing the job kills its process tree. POSIX uses process groups and resource limits. The platform also caps each match at 180 seconds. These local execution limits are not network/filesystem security.
+Hosted uploads and the legacy `src.simulator.run` process adapter default to a two-second callback limit. Messages are limited to 2 MB and diagnostic retention to 16 KB. Windows Job Objects cap each submitted player at one process, 256 MB combined memory and 30 seconds of CPU over its lifetime; closing the job kills its process tree. POSIX uses process groups and resource limits. The platform also caps each match at 180 seconds. These execution limits are not network/filesystem security.
+
+The newer local `catansim` CLI uses trusted player processes without those OS memory/CPU/process-count caps, with a configurable `--timeout` (default two seconds). Player prints stream to stderr; `--quiet-player` suppresses them. `--debug` runs your original file in process for `breakpoint()` and IDE debugging, without callback timeouts. Failures include local decision/action details or tracebacks. `catansim update` (alias `catansim --update`) updates an installed simulator; see `LOCAL_DEVELOPMENT.md` for installation, first-time updates and full examples. These local options do not change hosted upload behaviour.
 
 Invalid decisions or callback failures end competitive matches with `player_failed` (shown as failed in the web catalog); no silent replacement strategy is used. Operational limits produce `stopped`, not a winner. Direct in-process execution is for trusted code and does not enforce callback timeouts.
 

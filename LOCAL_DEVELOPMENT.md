@@ -19,7 +19,21 @@ python -m pip install -e .
 catansim --help
 ```
 
-This is an installation from the repository, not a published PyPI package. Local tools have no web/database dependency. Use `python -m src.simulator.cli` in place of `catansim` if needed. Keep your player project outside the downloaded SDK's `src` folder when using the installed simulator, so that the interface-only folder does not shadow the full installation.
+This installs this repository's `catansimulator` package and registers its `catansim` command in the active Python environment. `-e` means editable: the installation points to this checkout rather than copying its source. It is not a published PyPI package. After installation you can run `catansim` from your separate player project, passing a relative or absolute player path. Local tools have no web/database dependency. Use `python -m src.simulator.cli` in place of `catansim` if needed. If using the installed simulator from an extracted SDK folder, move/remove the interface-only `src` folder first: it can shadow the installed full simulator, especially with `python -m`.
+
+## Updating
+
+In the same activated environment, run:
+
+```bash
+catansim update
+# Equivalent alias:
+catansim --update
+```
+
+For an editable repository installation, this checks that the checkout is clean, pulls its tracked branch with `git pull --ff-only`, then refreshes the editable installation. It refuses local changes and divergent branches rather than resetting or overwriting them. Commit or stash changes yourself before retrying. For a copied/wheel installation, it reinstalls the latest package from the official GitHub repository. Updates require internet and Git; ordinary games do not. Restart running Python/IDE sessions afterwards. If a platform prevents replacing the running command executable, use `python -m src.simulator.cli update`.
+
+Older installations do not yet have this command. To get it the first time, run `git pull --ff-only` inside your simulator checkout and `python -m pip install -e .` using your active environment.
 
 ## Run a player
 
@@ -38,6 +52,23 @@ Summary output includes the outcome, reason, seed, your seat, winner, completed 
 JSON output is suitable for scripts. Use `--results` with verbose mode to write JSON without mixing it with the human-readable log. `--replay` writes a spectator recording; `--audit` writes private debugging data including decisions and private events. Do not publish private audits. Player files use the same `Player` API as uploads and run in a separate process with a two-second callback timeout; use `--timeout 30` for slower local models. The new CLI uses trusted local execution without the hosted OS memory/CPU/process-count caps, so your virtual environment and model libraries can run. Hosted upload restrictions are unchanged. Exit code 1 means a player failed; code 2 means a CLI/setup error; limits are a normal exit with a stopped result.
 
 The existing `python -m src.simulator.run` command still accepts zero or four `--player` files, replay/audit paths and a turn limit.
+
+## Prints, errors and breakpoints
+
+Your `print()` output (including during import and events) is streamed to **stderr** by default. This keeps `--output json` on stdout parseable. Use `--quiet-player` to suppress player prints, or `2> player.log` to save them. For example:
+
+```bash
+catansim play --player simple-strat/true_random.py --opponents easy --seed 20
+catansim play --player my_player.py --output json > result.json
+catansim play --player my_player.py --debug --seed 20
+python -m pdb -m src.simulator.cli play --player my_player.py --debug --seed 20
+```
+
+Failures show the invalid action, decision ID, phase and available action types. Callback exceptions include local tracebacks. These details are also in JSON `failure_context` for failed matches. For example, returning just `{'type': 'TRADE'}` reports missing `give`, `receive` and `recipients`: choose another action or fill the template as described in `PLAYER_API.md`. Random players must handle all three templates (`TRADE`, `COUNTER`, `DISCARD`), not blindly return any option.
+
+`--debug` runs your player in the CLI's process from its original file. Put `breakpoint()` in your callbacks for an interactive debugger, or configure your IDE to run module `src.simulator.cli` with arguments `play --player /path/to/my_player.py --debug --seed 20`. IDE breakpoints in both the player and engine work in this mode. Callback timeouts/process limits are disabled, so pausing does not fail the match. Game turn/decision limits still apply. Debug mode also works with `evaluate`, but pauses can occur in every match. Your current working directory stays unchanged, and the player file's directory is available for sibling imports. Without `--debug`, player code runs in a subprocess; ordinary IDE breakpoints in the CLI process will not stop that child.
+
+This is trusted local debugging. The website still uses its original process limits and does not expose these local tracebacks or private decisions. Python's `CatanEnv` already runs in process and can be debugged directly without a CLI flag.
 
 ## Compare versions across games
 
