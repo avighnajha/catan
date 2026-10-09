@@ -37,8 +37,11 @@ Older installations do not yet have this command. To get it the first time, run 
 
 ## Run a player
 
+Add **`--debug`** to `play` or `evaluate` to run your player in process and hit `breakpoint()` or IDE breakpoints. Callback timeouts are disabled in this mode. See [Prints, errors and breakpoints](#prints-errors-and-breakpoints) below for debugger setup.
+
 ```bash
 catansim play --player examples/my_player.py --opponents medium --seed 42
+catansim play --player my_player.py --opponents easy --seed 42 --debug
 catansim play --player my_player.py --opponents easy --max-turns 0 --verbose
 catansim play --player my_player.py --opponents hard --max-turns 20 --verbose --color always
 catansim play --player my_player.py --seat P3 --output json --results result.json

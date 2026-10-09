@@ -21,6 +21,8 @@ Run headlessly with `python -m src.simulator.run --seed 42 --replay match.json`.
 
 For the local `catansim` CLI, coloured terminal boards, batch evaluation and the decision-by-decision Python training environment, see [Local development](LOCAL_DEVELOPMENT.md). Install from this checkout with `python -m pip install -e .`; no hosted backend is needed.
 
+To debug your player with `breakpoint()` or IDE breakpoints, run `catansim play --player my_player.py --debug`. Debug mode runs in process without callback timeouts; see the [CLI debugging guide](LOCAL_DEVELOPMENT.md#prints-errors-and-breakpoints).
+
 ## Tests
 
 ```powershell
