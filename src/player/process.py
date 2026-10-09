@@ -66,7 +66,11 @@ class ProcessPlayer(Player):
         env['PYTHONPATH']=str(Path(__file__).resolve().parents[2])
         if trusted_local: env['PYTHONPATH']+=os.pathsep+str(source.parent)
         env['PYTHONIOENCODING']='utf-8'
-        command=[sys.executable,'-u','-m','src.player.host',str(source)]
+        # With -m, the working directory precedes PYTHONPATH. An extracted SDK
+        # can therefore shadow the installed simulator's src.player package.
+        # Pin our own package first while preserving the user's working directory.
+        bootstrap="import sys, runpy; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module('src.player.host', run_name='__main__', alter_sys=True)"
+        command=[sys.executable,'-u','-c',bootstrap,str(Path(__file__).resolve().parents[2]),str(source)]
         if trusted_local: command.append('--trusted-local')
         self.process=subprocess.Popen(command,
             cwd=None if trusted_local else self.temp.name,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,

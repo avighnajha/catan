@@ -110,3 +110,19 @@ def test_installed_copy_update_uses_official_repository(tmp_path,monkeypatch):
     monkeypatch.setattr(update.subprocess,'run',lambda cmd,**k:calls.append(cmd))
     assert update.update_installation()==0
     assert calls==[[sys.executable,'-m','pip','install','--upgrade','--force-reinstall',f'git+{update.REPOSITORY}']]
+
+
+def test_player_host_is_not_shadowed_by_sdk_in_bot_project(tmp_path,monkeypatch,capsys):
+    import shutil
+    sdk=tmp_path/'src/player'
+    sdk.mkdir(parents=True)
+    (tmp_path/'src/__init__.py').write_text('')
+    for name in ('__init__.py','interface.py','types.py'):
+        shutil.copy(Path('src/player')/name,sdk/name)
+    source=Path('examples/my_player.py').read_text()
+    path=tmp_path/'my_player.py'
+    path.write_text(source)
+    monkeypatch.chdir(tmp_path)
+    assert main(['play','--player',str(path),'--max-turns','0','--output','json'])==0
+    result=json.loads(capsys.readouterr().out)
+    assert result['status']=='stopped' and result['decisions']==16
