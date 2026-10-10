@@ -5,6 +5,32 @@ const playerCode=`from src.player.example import ExamplePlayer
 class BrowserPlayer(ExamplePlayer):
     pass
 `;
+
+test('edit player metadata, save changed code as a new version and remove a version',async({page})=>{
+  await page.goto('/');
+  const suffix=Date.now();
+  await register(page,`Manager${suffix}`,`manager${suffix}@example.com`);
+  await uploadBot(page,'Managed player');
+  await page.getByRole('button',{name:'Edit',exact:true}).click();
+  await page.getByRole('textbox',{name:'Description',exact:true}).fill('Updated player description');
+  await page.getByRole('button',{name:'Save changes',exact:true}).click();
+  await expect(page.locator('article.card')).toContainText('Updated player description');
+  await page.getByRole('button',{name:'Edit',exact:true}).click();
+  await page.getByRole('textbox',{name:'Player code',exact:true}).fill(playerCode+'\n# Updated source\n');
+  await page.getByRole('button',{name:'Save changes',exact:true}).click();
+  await expect(page.locator('#editBotForm .form-error')).toContainText('new version');
+  await page.getByRole('textbox',{name:'New version',exact:true}).fill('v2');
+  await page.getByRole('button',{name:'Save changes',exact:true}).click();
+  await expect(page.locator('article.card')).toHaveCount(2);
+  const original=page.locator('article.card').filter({has:page.locator('.eyebrow',{hasText:'v1'})});
+  await original.getByRole('button',{name:'Remove',exact:true}).click();
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  await expect(page.locator('article.card')).toHaveCount(2);
+  await original.getByRole('button',{name:'Remove',exact:true}).click();
+  await page.getByRole('button',{name:'Remove player',exact:true}).click();
+  await expect(page.locator('article.card')).toHaveCount(1);
+  await expect(page.locator('article.card')).toContainText('v2');
+});
 async function register(page,name,email){
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByRole('button',{name:'New here? Create an account',exact:true}).click();

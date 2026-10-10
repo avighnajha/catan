@@ -33,7 +33,7 @@ from .replay_store import ReplayStore
 from .room_service import RoomService
 from .auth import AuthService
 from .builtin_players import catalog as builtin_catalog, package as builtin_package
-from .database import RoomAccess
+from .database import RoomAccess, Bot, RemovedBot
 
 DATABASE_URL = os.getenv("CATAN_DB_URL", "sqlite:///catan_platform.db")
 default_replays = (DATABASE_URL.removeprefix("sqlite:///") + ".replays"
@@ -58,7 +58,7 @@ if frontend_origins:
         CORSMiddleware,
         allow_origins=frontend_origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "Authorization"],
     )
 assets = Path(__file__).with_name("static")
@@ -72,6 +72,13 @@ class BotUploadRequest(BaseModel):
     description: str = Field(default="", max_length=2000)
     bot_code: str = Field(default="", max_length=200_000)
     use_sandbox: bool = True
+
+
+class BotEditRequest(BaseModel):
+    bot_name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default='', max_length=2000)
+    class Config:
+        extra = 'forbid'
 
 
 class RoomJoinRequest(BaseModel):
@@ -150,6 +157,9 @@ def package_data(package):
 
 
 def require_bot(bot_id, user=None):
+    with bot_registry.db_manager as session:
+        if bot_id and session.get(RemovedBot, bot_id):
+            raise HTTPException(404, 'This bot was removed. Select another saved version.')
     package = (builtin_package(bot_id) or bot_registry.get_bot(bot_id)) if bot_id else None
     if package is None or not package.validated:
         raise ValueError("Select an existing, valid bot version")
@@ -514,6 +524,8 @@ def upload_bot(payload: BotUploadRequest, request: Request):
             name_for_id = f"{user['user_id'][:13]}-{name}"
         else:
             name_for_id = name
+        if bot_registry.get_bot(f'{name_for_id}-{version}'):
+            raise HTTPException(409, 'That version already exists, including removed versions. Choose a new version name.')
         package = bot_registry.register(name_for_id, version,
                                        entrypoint=payload.entrypoint, description=payload.description,
                                        bot_code=payload.bot_code if payload.use_sandbox else None,
@@ -543,7 +555,52 @@ def get_bot(bot_id: str, request: Request):
         raise KeyError(bot_id)
     if not owns_bot(package, user):
         raise HTTPException(403, "That bot belongs to another account")
-    return package_data(package)
+    with bot_registry.db_manager as session:
+        if session.get(RemovedBot, bot_id): raise HTTPException(404, 'Bot was removed')
+    result = package_data(package)
+    # Source is private to its owner, even in optional-auth local mode.
+    if (package.owner_id is None and not AUTH_REQUIRED) or (user and package.owner_id == user['user_id']):
+        result['bot_code'] = package.bot_code or ''
+    return result
+
+
+def editable_bot(bot_id, request):
+    user = current_user(request)
+    package = bot_registry.get_bot(bot_id)
+    if package is None: raise HTTPException(404, 'Bot not found')
+    if package.owner_id is not None:
+        if not user or package.owner_id != user['user_id']:
+            raise HTTPException(403, 'Only the owner can change this bot')
+    elif AUTH_REQUIRED:
+        raise HTTPException(403, 'This bot has no editable account owner')
+    with bot_registry.db_manager as session:
+        if session.get(RemovedBot, bot_id): raise HTTPException(404, 'Bot was removed')
+    return package
+
+
+@app.patch('/bots/{bot_id}')
+def edit_bot(bot_id: str, payload: BotEditRequest, request: Request):
+    with mutation_lock:
+        package = editable_bot(bot_id, request)
+        name = payload.bot_name.strip()
+        if not name: raise HTTPException(400, 'Player name is required')
+        with bot_registry.db_manager as session:
+            duplicate = session.query(Bot).filter(Bot.owner_id == package.owner_id, Bot.name == name,
+                                                  Bot.version == package.version, Bot.id != bot_id).first()
+            if duplicate: raise HTTPException(409, 'That player name and version already exist')
+            row = session.get(Bot, bot_id)
+            row.name = name
+            row.description = payload.description.strip()
+        return package_data(bot_registry.get_bot(bot_id))
+
+
+@app.delete('/bots/{bot_id}')
+def remove_bot(bot_id: str, request: Request):
+    with mutation_lock:
+        editable_bot(bot_id, request)
+        with bot_registry.db_manager as session:
+            session.add(RemovedBot(bot_id=bot_id))
+        return {'removed': True, 'bot_id': bot_id}
 
 
 @app.get("/", response_class=HTMLResponse)

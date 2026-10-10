@@ -92,6 +92,12 @@ class Bot(Base):
         }
 
 
+class RemovedBot(Base):
+    """Library removals retain immutable code needed by existing matches."""
+    __tablename__ = 'removed_bots'
+    bot_id = Column(String, primary_key=True)
+
+
 class Game(Base):
     """Game model for storing game metadata and results."""
     __tablename__ = "games"
@@ -283,10 +289,12 @@ class BotRepository:
         with self.db as session:
             return session.query(Bot).filter(Bot.id == bot_id).first()
     
-    def list_bots(self, owner_id: Optional[str] = None) -> List[Bot]:
+    def list_bots(self, owner_id: Optional[str] = None, include_removed: bool = False) -> List[Bot]:
         """List all bots, optionally filtered by owner."""
         with self.db as session:
             query = session.query(Bot)
+            if not include_removed:
+                query = query.filter(~Bot.id.in_(session.query(RemovedBot.bot_id)))
             if owner_id:
                 query = query.filter(Bot.owner_id == owner_id)
             return query.order_by(Bot.name, Bot.version).all()

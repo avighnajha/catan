@@ -17,6 +17,8 @@ Local player names are convenience identifiers, not authenticated accounts. This
 
 ## What is implemented
 
+In **My bots**, use **Edit** to change a saved player's name or description, or edit/replace its Python source and supply a new version name. Source changes create a new validated version; existing versions and match recordings retain their original implementation. **Remove** asks for confirmation and hides that version from the library and new selections. Original code is retained for existing recordings and queued matches, and removed version IDs cannot be reused. Open rooms selecting a removed version must select another before starting. Only the owner can edit or remove account-owned players.
+
 - Match archive with queued/running/stopped/completed/failed status and reloadable links.
 - Four-seat rooms, joining, persistent bot selections, ready/unready, selection resets, duplicate-seat/start protection and frozen participant/version metadata.
 - Player-version creation, Python file/code upload, API validation diagnostics, details and duplicate-version protection. Every registered version contains a validated Player implementation.
