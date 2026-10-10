@@ -3,6 +3,8 @@ from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass, asdict
 import uuid
+import json
+import traceback
 
 from ..board import BoardGeometry, BoardSetup
 from ..core import BankState, GamePhase, GameState, GameStatus, PlayerState, TurnState
@@ -77,6 +79,21 @@ class Simulator(RulesEngine):
         self._events=[]
         self._in_callback=False
         self._faults=[]
+        self.failures=[]
+
+    def _record_failure(self,pid,callback,error,action=None):
+        """Private diagnostics only; never inserted into events or public results."""
+        detail=getattr(self.players.get(pid),'last_error',None) or {}
+        entry={'player_id':pid.value,'callback':callback,'phase':self.stage,
+               'decision_id':self.decision_number,'turn_number':self.game_state.turn_state.turn_number,
+               'error':(detail.get('detail') or str(error))[:8192],
+               'traceback':(detail.get('traceback') or traceback.format_exc())[-16384:]}
+        if callback=='validate_action':
+            encoded=json.dumps(thaw(action),default=repr)
+            entry['returned_action']=json.loads(encoded) if len(encoded)<=8192 else {'truncated_preview':encoded[:8192]}
+            entry['available_types']=sorted({o['type'] for o in self.available_actions()})
+            entry['hint']='Return a concrete offered action unchanged. Fill TRADE/COUNTER give and receive maps (TRADE also needs recipients); fill DISCARD resources and omit count.'
+        self.failures.append(entry)
 
     @property
     def board(self): return self.game_state.board_state
@@ -119,6 +136,7 @@ class Simulator(RulesEngine):
         try:
             return getattr(self.players[pid],method)(*args)
         except Exception as error:
+            self._record_failure(pid,method,error)
             raise PlayerFailure(f'{pid.value} failed in {method}: {type(error).__name__}') from error
         finally:
             self._in_callback=False
@@ -204,6 +222,7 @@ class Simulator(RulesEngine):
         try:
             self.apply_action(pid,action,self.decision_number)
         except (ValueError,TypeError,KeyError) as error:
+            self._record_failure(pid,'validate_action',error,action)
             self._finish('player_failed',f'{pid.value}: invalid action ({error})')
         return self.result
 

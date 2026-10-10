@@ -48,10 +48,11 @@ def terminate_tree(process):
 
 
 class ProcessPlayer(Player):
-    def __init__(self,code,timeout=2.0,trusted_local=False,log_stream=None,source_path=None):
+    def __init__(self,code,timeout=2.0,trusted_local=False,log_stream=None,source_path=None,capture_errors=False):
         self.timeout=timeout
         self.trusted_local=trusted_local
         self.log_stream=log_stream
+        self.last_error=None
         self.closed=False
         self.job=None
         self.temp=tempfile.TemporaryDirectory(prefix='catan_player_')
@@ -72,6 +73,7 @@ class ProcessPlayer(Player):
         bootstrap="import sys, runpy; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module('src.player.host', run_name='__main__', alter_sys=True)"
         command=[sys.executable,'-u','-c',bootstrap,str(Path(__file__).resolve().parents[2]),str(source)]
         if trusted_local: command.append('--trusted-local')
+        if capture_errors: command.append('--capture-errors')
         self.process=subprocess.Popen(command,
             cwd=None if trusted_local else self.temp.name,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
             creationflags=(subprocess.CREATE_NO_WINDOW | (0 if trusted_local else 0x4)) if os.name=='nt' else 0,
@@ -89,8 +91,10 @@ class ProcessPlayer(Player):
         try:
             hello=self._receive()
             if hello!={'ready':True,'protocol_version':1}: raise RuntimeError('Player handshake failed')
-        except Exception:
-            self.close();raise
+        except Exception as error:
+            self.close()
+            if capture_errors: error.player_diagnostics=self.diagnostics.decode('utf-8',errors='replace')
+            raise
 
     def _read(self):
         try:
@@ -122,6 +126,7 @@ class ProcessPlayer(Player):
         except queue.Empty:
             self.close();raise TimeoutError('Player callback timed out')
         if not isinstance(item,dict) or 'error' in item:
+            if isinstance(item,dict): self.last_error=item
             detail=(item.get('traceback') or item.get('detail') or item.get('error')) if isinstance(item,dict) else ''
             raise RuntimeError(f'Player callback failed: {detail}' if self.trusted_local else 'Player callback failed')
         return item

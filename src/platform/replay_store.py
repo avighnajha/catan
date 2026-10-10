@@ -67,6 +67,15 @@ class ReplayStore:
         path = self._path(game_id, "replay")
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
+    def save_errors(self,game_id,errors):
+        with self.lock:
+            self._write(self._path(game_id,'errors'),{'errors':errors})
+
+    def errors(self,game_id):
+        self.metadata(game_id)
+        path=self._path(game_id,'errors')
+        return json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'errors':[]}
+
     def recover(self):
         """Single-server deployment: jobs from an earlier process were interrupted."""
         for meta in self.list_games():

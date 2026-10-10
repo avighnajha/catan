@@ -48,8 +48,8 @@ def main():
         except Exception as error:
             # Do not publish exception messages, which may contain private state.
             failure={'id':request['id'],'error':type(error).__name__}
-            if '--trusted-local' in sys.argv[2:]:
-                failure.update(detail=str(error),traceback=traceback.format_exc())
+            if '--trusted-local' in sys.argv[2:] or '--capture-errors' in sys.argv[2:]:
+                failure.update(detail=str(error)[:8192],traceback=traceback.format_exc()[-16384:])
             encoded=json.dumps(failure)
         output.write(encoded+'\n');output.flush()
 

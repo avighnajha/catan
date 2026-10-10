@@ -31,6 +31,29 @@ test('edit player metadata, save changed code as a new version and remove a vers
   await expect(page.locator('article.card')).toHaveCount(1);
   await expect(page.locator('article.card')).toContainText('v2');
 });
+
+test('failed match displays private returned-action details and traceback',async({page})=>{
+  await page.goto('/');
+  const suffix=Date.now();
+  await register(page,`ErrorOwner${suffix}`,`errors${suffix}@example.com`);
+  const me=await page.evaluate(async()=>{const r=await fetch('/auth/me',{headers:{Authorization:`Bearer ${localStorage.getItem('catan-session')}`}});return (await r.json()).user;});
+  const {metadata,replay}=completeBoardFixture();
+  metadata.status='failed';metadata.participants[0].user_id=me.user_id;
+  await page.route('**/games/game-fixture',route=>route.fulfill({json:metadata}));
+  await page.route('**/game/game-fixture/replay',route=>route.fulfill({json:replay}));
+  await page.route('**/games/game-fixture/errors',route=>route.fulfill({json:{errors:[{
+    player_id:'P1',callback:'validate_action',phase:'PLAYING',turn_number:1,decision_id:17,
+    error:'TRADE missing give, receive and recipients',returned_action:{type:'TRADE'},
+    available_types:['TRADE','END_TURN'],hint:'Fill the trade template.',
+    traceback:'Traceback (most recent call last):\nValueError: Invalid trade <script>never executed</script>'
+  }]}}));
+  await page.goto('/#match/game-fixture');
+  await page.getByRole('button',{name:'Player error log',exact:true}).click();
+  await expect(page.locator('#modalBody')).toContainText('TRADE missing give');
+  await expect(page.locator('#modalBody')).toContainText('"type": "TRADE"');
+  await expect(page.locator('#modalBody')).toContainText('ValueError: Invalid trade <script>never executed</script>');
+  await expect(page.locator('#modalBody script')).toHaveCount(0);
+});
 async function register(page,name,email){
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByRole('button',{name:'New here? Create an account',exact:true}).click();

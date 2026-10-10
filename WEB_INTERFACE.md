@@ -33,6 +33,8 @@ In **My bots**, use **Edit** to change a saved player's name or description, or 
 
 ## Storage and boundaries
 
+Failed matches offer **Player error log** to signed-in participants. It shows only errors from their own seats: callback, phase/turn/decision, traceback, and (for invalid decisions) the returned action, available action types and guidance. Diagnostics are stored separately from public recordings and filtered by player ownership. Hosted process limits still apply. Earlier recordings may have no saved diagnostics; those display an explanatory message instead of a reconstructed trace.
+
 `CATAN_DB_URL` defaults to `sqlite:///catan_platform.db` for rooms, implementation versions and the match catalog. `CATAN_REPLAY_DIR` overrides the recording directory; by default it is the SQLite filename plus `.replays` (for example `catan_platform.db.replays`). Keep both across restarts. Local state is ignored by Git.
 
 `src/platform/server.py` handles requests, starts jobs and serves the static client. `RecordingSimulator` in `src/platform/recording.py` subscribes to native committed simulator transitions. It does not replace rules or bot decisions. Every recorded transition contains a copied public snapshot, so random access and backward seeking are exact without client-side Catan rules. The final recording is written before metadata advertises that it is available.

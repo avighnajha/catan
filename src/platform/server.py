@@ -334,6 +334,21 @@ def replay(game_id: str, request: Request):
     return recording
 
 
+@app.get('/games/{game_id}/errors')
+def match_errors(game_id: str, request: Request):
+    metadata=check_game(game_id,request)
+    user=current_user(request)
+    if not user: raise HTTPException(401,'Sign in to view your player error log')
+    owned=[]
+    for participant in metadata.get('participants',[]):
+        package=bot_registry.get_bot(participant.get('bot_id')) if participant.get('bot_id') else None
+        if (package and package.owner_id==user['user_id']) or participant.get('user_id')==user['user_id']:
+            owned.append(participant['player_id'])
+    if not owned: raise HTTPException(403,'Only player owners can view their own error logs')
+    errors=[e for e in store.errors(game_id)['errors'] if e.get('player_id') in owned]
+    return {'game_id':game_id,'errors':errors,'message': 'No saved error details for your player. Older matches may predate error logging.' if not errors else ''}
+
+
 @app.get("/game/{game_id}/state")
 def state(game_id: str, request: Request, player: str | None = None):
     if player is not None:
