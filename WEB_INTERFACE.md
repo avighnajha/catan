@@ -33,6 +33,8 @@ In **My bots**, use **Edit** to change a saved player's name or description, or 
 
 ## Storage and boundaries
 
+Match results include expandable development-card counts for each player (public `DevelopmentCardPlayed` events; victory point cards excluded). Below dice distribution, the report also plots all five resource holdings with one tab per player, line toggles and a position slider for exact counts. The chart preserves every recorded transition within each individual player turn, including trades/builds/discards, and separates setup. It uses finished spectator snapshots, never supplies these hands to bots, and works with existing recordings that contain resource snapshots. Older recordings without hands show an unavailable message.
+
 Failed matches offer **Player error log** to signed-in participants. It shows only errors from their own seats: callback, phase/turn/decision, traceback, and (for invalid decisions) the returned action, available action types and guidance. Diagnostics are stored separately from public recordings and filtered by player ownership. Hosted process limits still apply. Earlier recordings may have no saved diagnostics; those display an explanatory message instead of a reconstructed trace.
 
 `CATAN_DB_URL` defaults to `sqlite:///catan_platform.db` for rooms, implementation versions and the match catalog. `CATAN_REPLAY_DIR` overrides the recording directory; by default it is the SQLite filename plus `.replays` (for example `catan_platform.db.replays`). Keep both across restarts. Local state is ignored by Git.

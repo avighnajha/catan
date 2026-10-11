@@ -6,6 +6,61 @@ class BrowserPlayer(ExamplePlayer):
     pass
 `;
 
+test('match report expands played cards and inspects five resources for each player',async({page})=>{
+  const {metadata,replay}=completeBoardFixture();
+  const events=[
+    {type:'DevelopmentCardPlayed',player_id:'P1',data:{card:'KNIGHT'}},
+    {type:'DevelopmentCardPlayed',player_id:'P1',data:{card:'KNIGHT'}},
+    {type:'DevelopmentCardPlayed',player_id:'P1',data:{card:'ROAD_BUILDING'}},
+    {type:'DevelopmentCardPlayed',player_id:'P2',data:{card:'MONOPOLY'}}
+  ];
+  const state=replay.frames[1].state;
+  replay.frames=[0,2,5,1,3].map((wood,index)=>{
+    const snapshot=structuredClone(state);snapshot.phase=index===0?'SETUP_FIRST':index===4?'GAME_OVER':'NORMAL_PLAY';
+    snapshot.turn_number=index===4?2:1;
+    snapshot.players.forEach((p,i)=>{p.resources={WOOD:wood+i*10,BRICK:1,SHEEP:2,WHEAT:3,ORE:4};p.resource_count=wood+i*10+10;});
+    return {sequence:index,label:index===2?'Trade completed':`Recorded action ${index}`,state:snapshot,events:index===2?events:[]};
+  });
+  replay.events=events;replay.result.statistics.players=replay.frames.at(-1).state.players;
+  await page.route('**/games/game-fixture',route=>route.fulfill({json:metadata}));
+  await page.route('**/game/game-fixture/replay',route=>route.fulfill({json:replay}));
+  await page.goto('/#match/game-fixture');
+  await page.getByRole('button',{name:'Show results ↗',exact:true}).click();
+  const ada=page.locator('.dev-card-list details').filter({has:page.locator('summary',{hasText:'Ada'})});
+  await expect(ada.locator('summary')).toContainText('3 played');
+  await ada.locator('summary').click();
+  await expect(ada.locator('dl>div').filter({hasText:'Knight'}).locator('dd')).toHaveText('2');
+  await expect(ada.locator('dl>div').filter({hasText:'Road building'}).locator('dd')).toHaveText('1');
+  const history=page.locator('#resourceHistory');
+  await expect(history.getByRole('tab')).toHaveCount(4);
+  await expect(history.locator('[data-series]')).toHaveCount(5);
+  await history.getByRole('slider',{name:'Resource history position'}).fill('2');
+  await expect(history.locator('.chart-position')).toContainText('Turn 1 · Trade completed');
+  await expect(history.locator('.chart-counts>span').filter({hasText:'Wood'})).toContainText('5');
+  await history.getByLabel('Wood',{exact:true}).uncheck();
+  await expect(history.locator('[data-series="WOOD"]')).toBeHidden();
+  await history.getByRole('tab',{name:'Babbage',exact:true}).click();
+  await expect(history.getByRole('tab',{name:'Babbage',exact:true})).toHaveAttribute('aria-selected','true');
+  await expect(history.locator('.chart-counts>span').filter({hasText:'Wood'})).toContainText('13');
+  await history.getByRole('tab',{name:'Babbage',exact:true}).press('ArrowRight');
+  await expect(history.getByRole('tab',{name:'Curie',exact:true})).toHaveAttribute('aria-selected','true');
+  await expect(history.locator('.chart-counts>span').filter({hasText:'Wood'})).toContainText('23');
+  await page.locator('#resourceHistory').screenshot({path:'test-results/match-resource-history.png'});
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.locator('#resourceHistory').screenshot({path:'test-results/match-resource-history-mobile.png'});
+});
+
+test('older match report without resource snapshots explains missing history',async({page})=>{
+  const {metadata,replay}=completeBoardFixture();
+  await page.route('**/games/game-fixture',route=>route.fulfill({json:metadata}));
+  await page.route('**/game/game-fixture/replay',route=>route.fulfill({json:replay}));
+  await page.goto('/#match/game-fixture');
+  await page.getByRole('button',{name:'Show results ↗',exact:true}).click();
+  await expect(page.locator('#resourceHistory')).toContainText('unavailable in this older recording');
+  await expect(page.locator('.dev-card-list summary')).toHaveCount(4);
+});
+
 test('edit player metadata, save changed code as a new version and remove a version',async({page})=>{
   await page.goto('/');
   const suffix=Date.now();

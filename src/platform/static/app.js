@@ -1,5 +1,6 @@
 import {Board, renderTopology, playerColors} from './board.js';
 import {Playback} from './playback.js';
+import {developmentCardReport,mountResourceReport} from './report.js';
 
 const app=document.querySelector('#app'), modal=document.querySelector('#modal');
 const accountName=document.querySelector('#accountName'),accountButton=document.querySelector('#accountButton');
@@ -133,6 +134,9 @@ function paintTrade(frame,index,participants){const el=document.querySelector('#
 function togglePlay(){if(!viewer)return;if(playTimer){stopPlayback();return;}if(viewer.playback.atEnd)viewer.playback.seek(0);paint();document.querySelector('#play').textContent='Ⅱ Pause';playTimer=setInterval(()=>{viewer.playback.step(1);paint();},Number(document.querySelector('#speed').value));}
 function showResults(scroll=true){if(!viewer)return;const {result}=viewer.replay,stats=result.statistics,el=document.querySelector('#results');const winner=viewer.participants.find(p=>p.player_id===result.winner)?.name||result.winner;
   el.hidden=false;el.innerHTML=`<div class="section-head"><h2>Match results</h2>${badge(result.status)}</div><div class="note">${esc(result.reason)}</div><div class="stats-grid"><div class="card"><div class="eyebrow">Winner</div><div class="stat-value">${esc(winner||'No winner')}</div><p class="muted">${winner?'Victory recorded by the simulator.':'This run ended without a victory.'}</p></div><div class="card"><div class="eyebrow">Dice rolls</div><div class="stat-value">${stats.roll_count}</div><p class="muted">Across ${stats.recorded_transitions} recorded transitions.</p></div><div class="card"><div class="eyebrow">Seed</div><div class="stat-value">${esc(viewer.replay.metadata.seed)}</div><p class="muted">Exact bot versions saved with the match.</p></div></div><div class="card" style="margin-top:16px"><h3>Final public standings</h3><div class="table-wrap"><table><thead><tr><th>Player</th><th>Public VP</th><th>Roads</th><th>Settlements</th><th>Cities</th><th>Knights</th></tr></thead><tbody>${stats.players.map(p=>`<tr><td>${esc(viewer.participants.find(x=>x.player_id===p.player_id)?.name||p.player_id)}</td><td>${p.victory_points}</td><td>${p.roads}</td><td>${p.settlements}</td><td>${p.cities}</td><td>${p.knights}</td></tr>`).join('')}</tbody></table></div><p class="muted">Hidden opponent cards remain excluded. Production and trade events are recorded in the match history.</p></div><div class="card"><h3>Dice distribution</h3><div class="histogram">${Array.from({length:11},(_,i)=>{const n=i+2,count=stats.dice_rolls[n]||0,max=Math.max(1,...Object.values(stats.dice_rolls));return `<div class="bar-column"><span>${count}</span><div class="bar" style="height:${count/max*85}px"></div><span>${n}</span></div>`;}).join('')}</div></div>`;
+  const reportPlayers=stats.players.map(p=>({...p,name:viewer.participants.find(who=>who.player_id===p.player_id)?.name||p.player_id}));
+  el.insertAdjacentHTML('beforeend',developmentCardReport(viewer.replay,reportPlayers)+'<div class="card report-card" id="resourceHistory"></div>');
+  mountResourceReport(el.querySelector('#resourceHistory'),viewer.replay,reportPlayers);
   if(scroll)el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
