@@ -110,12 +110,14 @@ Think of the board as a graph: **tiles** are hexes, **vertices** are corners whe
 
 | Collection | Fields on each entry |
 |---|---|
-| `board.tiles[tile_id]` | `resource` (resource name or `None` for desert), `number` (dice token; `None` for desert), `has_robber`, `vertices`, `edges` |
+| `board.tiles[tile_id]` | `resource` (resource name or `None` for desert), `number` (dice token; `None` for desert), `pips` (printed probability dots; `0` for desert), `has_robber`, `vertices`, `edges` |
 | `board.vertices[vertex_id]` | `x`, `y`, `neighbors` (adjacent vertex IDs), `edges` (incident edge IDs), `tiles` (touching tile IDs), `port` (port ID or `None`), `owner` (player ID or `None`), `building` (`SETTLEMENT`, `CITY`, or `None`) |
 | `board.edges[edge_id]` | `vertices` (the two endpoint IDs), `owner` (road owner or `None`) |
 | `board.ports[port_id]` | `type`, `vertices` (the two coastal endpoint IDs) |
 
 The sequences of IDs are tuples. Their order is not a clockwise traversal. Follow the links between entries instead of relying on sequence positions. Coordinates describe geometry; building actions always use IDs, never coordinates. `board.robber_tile` gives the occupied tile ID. Port types are `THREE_TO_ONE` or `TWO_TO_ONE_WOOD`, `TWO_TO_ONE_BRICK`, `TWO_TO_ONE_SHEEP`, `TWO_TO_ONE_WHEAT`, `TWO_TO_ONE_ORE`.
+
+`tile.pips` is public board information: 2/12 have 1 dot, 3/11 have 2, 4/10 have 3, 5/9 have 4, and 6/8 have 5. The desert has 0. These describe the printed token even while the robber blocks production; they are not a prediction of future rolls.
 
 For example, inspect your buildings and the tiles touching each one:
 
@@ -126,7 +128,7 @@ for vertex_id, vertex in view.board.vertices.items():
     print(vertex_id, vertex.building, (vertex.x, vertex.y))
     for tile_id in vertex.tiles:
         tile = view.board.tiles[tile_id]
-        print(tile_id, tile.resource, tile.number, tile.has_robber)
+        print(tile_id, tile.resource, tile.number, tile.pips, tile.has_robber)
     if vertex.port is not None:
         port = view.board.ports[vertex.port]
         print('Port:', port.type)

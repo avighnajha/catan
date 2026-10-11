@@ -71,3 +71,18 @@ def test_sdk_imports_standalone_without_simulator_or_external_dependencies(tmp_p
     completed=subprocess.run([sys.executable,'-S','-c',script],cwd=tmp_path,
                              capture_output=True,text=True,timeout=10)
     assert completed.returncode==0,completed.stderr
+
+
+def test_tile_pips_match_printed_tokens_for_every_player():
+    expected = {None: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5,
+                8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+    sim = Simulator(20)
+    for pid in PlayerId.all_players():
+        tiles = sim.build_view_for_player(pid).board.tiles
+        assert {tile.number for tile in tiles.values()} == set(expected)
+        assert all(tile.pips == expected[tile.number] for tile in tiles.values())
+        assert all(tile.pips == 0 for tile in tiles.values() if tile.resource is None)
+    productive = next(tile for tile in sim.board.tiles.values() if tile.number_token == 6)
+    productive.has_robber = True
+    blocked = sim.build_view_for_player(PlayerId.P1).board.tiles[productive.tile_id]
+    assert blocked.has_robber and blocked.pips == 5

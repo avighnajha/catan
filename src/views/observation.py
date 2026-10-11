@@ -2,6 +2,9 @@
 from ..player import freeze
 from ..simulator.types.resource import ResourceType
 
+TOKEN_PIPS = {None: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5,
+              8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+
 
 def observation(sim,pid):
     public=[]
@@ -21,7 +24,8 @@ def observation(sim,pid):
         else: public.append(item)
     g=sim.board_geometry
     board={'tiles':{t:{'resource':tile.resource_type.value if tile.resource_type else None,
-                          'number':tile.number_token,'has_robber':tile.has_robber,
+                          'number':tile.number_token,'pips':TOKEN_PIPS[tile.number_token],
+                          'has_robber':tile.has_robber,
                           'vertices':sorted(g.tiles[t].vertex_ids),'edges':sorted(g.tiles[t].edge_ids)}
                     for t,tile in sim.board.tiles.items()},
            'vertices':{v:{'x':vertex.coordinate.x,'y':vertex.coordinate.y,
