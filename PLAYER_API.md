@@ -8,6 +8,8 @@ From the Catan Simulator **My bots** page, choose **Add player version**, then s
 
 Extract the ZIP into a new folder, edit `examples/my_player.py`, and keep the included `src` folder beside it so the import `from src.player import Player` works locally. When ready, upload your `.py` file from the same **Add player version** dialog. The website validates it and saves it as an immutable version owned by your account.
 
+To run games from Python, install the full simulator into your bot project's virtual environment, then use `from catansim import CatanEnv`. The SDK alone supplies interfaces, not the engine. See [Local testing and training](LOCAL_DEVELOPMENT.md#python-games-and-experiments) for full games, batches, decision/turn/round runners and RL control. The ZIP includes `examples/local_games.py` and `examples/local_steps.py` as runnable examples after installing the simulator.
+
 ```python
 from src.player import Player
 

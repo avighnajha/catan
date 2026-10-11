@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 catansim = "src.simulator.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["src*"]
+include = ["src*", "catansim*"]
 
 [tool.setuptools.package-data]
 "src.player" = ["py.typed"]

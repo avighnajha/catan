@@ -19,7 +19,18 @@ python -m pip install -e .
 catansim --help
 ```
 
-This installs this repository's `catansimulator` package and registers its `catansim` command in the active Python environment. `-e` means editable: the installation points to this checkout rather than copying its source. It is not a published PyPI package. After installation you can run `catansim` from your separate player project, passing a relative or absolute player path. Local tools have no web/database dependency. Use `python -m src.simulator.cli` in place of `catansim` if needed. If using the installed simulator from an extracted SDK folder, move/remove the interface-only `src` folder first: it can shadow the installed full simulator, especially with `python -m`.
+This installs this repository's `catansimulator` package and registers its `catansim` command in the active Python environment. `-e` means editable: the installation points to this checkout rather than copying its source. It is not a published PyPI package. After installation you can run `catansim` from your separate player project, passing a relative or absolute player path. Local tools have no web/database dependency. The legacy fallback `python -m src.simulator.cli` also works, but when running that command from an extracted SDK folder, move/remove the interface-only `src` folder first: it can shadow the installed full simulator. The new public Python import below handles the SDK folder automatically.
+
+For Python scripts in a separate bot project, install the simulator into **that project's virtual environment**. For example, in PowerShell:
+
+```powershell
+cd C:\Users\avigh\Projects\catan-bots
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e C:\Users\avigh\Projects\catan
+python -c "from catansim import CatanEnv; print(CatanEnv)"
+```
+
+The installed distribution is named `catansimulator`, its CLI is `catansim`, and its public Python import is `catansim`. The SDK ZIP alone cannot run simulations. `from catansim import CatanEnv` also works beside the SDK's interface-only `src` folder; it connects that interface to the installed engine. Existing imports from `src.simulation.environment` remain compatible, but use the public import in new scripts. Refresh the editable installation after pulling these changes so Python discovers the new package.
 
 ## Updating
 
@@ -81,13 +92,86 @@ catansim evaluate --player my_player.py --opponents medium --games 100 --seed 42
 
 `--games` is the total match count. Seats rotate P1, P2, P3, P4; each group of four uses the same seed, then the seed increments. Multiples of four give balanced seat coverage. Each match constructs fresh players. Output separates completed games, limits and failures, reports wins out of completed games, average own score across all runs, and counts by seat. The JSON contains every individual result. Compare versions with identical seeds, opponents and limits; a small sample is not reliable evidence of improvement.
 
-## Python decision environment
+## Python games and experiments
+
+Use `CatanEnv` with a **player factory** to run your existing Player automatically. All four players receive the same `choose_action`, lifecycle and separate `on_event` callbacks as CLI games. The factory is a class or zero-argument function that creates a fresh Player on every `reset`; do not reuse one instance across games.
+
+```python
+from catansim import CatanEnv
+from my_player import MyPlayer  # Your own module/class, not a built-in strategy.
+
+env = CatanEnv(player_factory=MyPlayer, opponents='easy', player_id='P1')
+view, info = env.reset(seed=20)
+result = env.run()
+print(result.status, result.winner, result.reason)
+```
+
+Automatic mode's `reset` creates the board and all players, delivers game-start callbacks/events, and stops **before initial placement decisions**. Inspect `view.board`, then advance at whichever level you need:
+
+| Method | What it finishes | Returns |
+| --- | --- | --- |
+| `run_step()` | One pending decision by whichever seat must act, including placement, discard or trade responses | `(view, info)` |
+| `run_setup()` | All remaining initial placements; no normal turn decisions | `(view, info)` |
+| `run_turn()` | The current active player's normal turn, including other players' responses | `(view, info)` |
+| `run_round()` | The remainder of the current round, ending after P4's turn | `(view, info)` |
+| `run()` | The entire remaining game, or a configured limit/failure | Immutable result |
+
+`run_turn()` and `run_round()` finish setup first if needed. They finish the current turn/round from wherever you paused. For example, `run_turn()` from the start of P1's turn leaves P2 to act; the following `run_round()` finishes P2, P3 and P4, leaving P1 at the start of round two. Calling `run_round()` at a round boundary runs the next complete round. One decision is not necessarily one turn, and its acting seat may differ from the active turn owner.
+
+```python
+env.reset(seed=20)
+view, info = env.run_setup()
+view, info = env.run_step()   # Normally P1 rolls; this can create discard decisions.
+view, info = env.run_turn()   # Finish the rest of P1's turn.
+view, info = env.run_round()  # Finish P2, P3 and P4.
+print(info.round_number, info.turn_number, info.acting_player)
+print(view.self.resources)
+for event in info.events:
+    print(event.type, event.data)
+result = env.run()           # Resume the same game to completion.
+```
+
+Every runner stops early for victory, a player failure or a configured limit. Inspect `info.result` after partial runs; it is `None` while the game continues. Once ended, automatic runners return the existing result without calling players again. Call `reset` for a fresh game. `max_turns=0` completes setup only; normal turns, not rounds, count toward this limit.
+
+Returned views always belong to your configured `player_id` and hide opponents' exact hands. `info.acting_player` identifies the next decision's seat (`None` when ended). `info.legal_actions` is empty when another seat must act, so another player's private choices are not exposed. `info.events` contains visible events since the previous snapshot return; callbacks still receive them as they happen. `info.phase`, `turn_number`, `round_number` and `decision_id` describe the current position. The local `env.sim` is available for trusted debugging/audits, but is engine state, not a privacy-filtered observation.
+
+To run 100 games from your own Python code:
+
+```python
+from collections import Counter
+from catansim import CatanEnv, thaw
+from my_player import MyPlayer
+
+runs = []
+for index in range(100):
+    seat = f'P{index % 4 + 1}'
+    seed = 20 + index // 4
+    env = CatanEnv(player_factory=MyPlayer, player_id=seat, opponents='medium')
+    env.reset(seed=seed)
+    runs.append(dict(thaw(env.run()), seed=seed, player_id=seat))
+
+completed = [r for r in runs if r['status'] == 'completed']
+wins = sum(r['winner'] == r['player_id'] for r in completed)
+print('Statuses:', Counter(r['status'] for r in runs))
+print('Wins:', wins, 'out of', len(completed), 'completed games')
+```
+
+This rotates seats and uses the same seed for each group of four games, matching CLI evaluation. Limits and failures are reported separately from completed losses. The SDK ZIP and repository include runnable scripts: `examples/local_games.py` for batches and `examples/local_steps.py` for inspection. Replace their `MyPlayer` import with your own. After installing the simulator, run:
+
+```bash
+python examples/local_games.py --games 100 --seed 20 --opponents medium > results.json
+python examples/local_steps.py
+```
+
+These calls run locally in process with no account, server or database. Breakpoints and prints work directly; there are no callback timeouts or hosted OS caps. Only run trusted local players. Game limits still apply. Custom opponents can be supplied as `opponents=lambda seat: MyOpponent()`; create a fresh instance for each seat. Built-in opponents require CPython 3.10 or 3.12. For parallel experiments use separate environment instances in separate processes.
+
+## Python decision environment for RL
 
 `CatanEnv` lets a Python training or debugging program choose each action directly. It uses the same rules engine as CLI and hosted games and runs locally in process. It is a lightweight Python interface with Gym-style return values, not a Gymnasium subclass: no numeric observation encoding, fixed action space, neural network or learning algorithm is supplied.
 
 ```python
 from src.player import Player
-from src.simulation.environment import CatanEnv
+from catansim import CatanEnv
 
 class EventMemory(Player):
     def on_game_start(self, view):
@@ -128,6 +212,8 @@ while info.result is None:
 ```
 
 `reset` starts a fresh match and advances opponents to your first decision. `step` applies one action, delivers committed events, and advances opponents until your next decision or the match ends. Your decisions can include trade responses and discards during other players' turns. `info.legal_actions` contains current legal actions; templates follow the same rules in `PLAYER_API.md`. `info.decision_id` identifies the decision, and `info.events` contains only events visible to your seat since the previous return. The optional listener receives separate lifecycle and `on_event` callbacks as those events happen; its `choose_action` is not used. Listener memory should reset in `on_game_start`.
+
+Omit `player_factory` for this external-control mode. `step(action)` supplies your decision and advances opponents automatically; it differs from automatic mode's `run_step()`, which calls exactly one seat's Player callback. Automatic runners require a `player_factory`, and `step(action)` requires external control; mixing the two modes raises an explanatory error. Neither mode supplies a learning algorithm or reward encoding beyond the defaults below.
 
 Views/actions/events remain immutable and opponents' exact hands remain private. A completed match or player failure sets `terminated`; a configured limit sets `truncated`. Check `info.result.status` to distinguish failure from victory. Illegal actions end the episode as `player_failed`, just as in ordinary matches. After either flag, call `reset` for another episode; stepping an ended episode raises an error. A failure during reset can already produce a non-null result with no legal actions.
 
