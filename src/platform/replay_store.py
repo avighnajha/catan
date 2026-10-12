@@ -41,6 +41,11 @@ class ReplayStore:
             db.execute('INSERT OR REPLACE INTO match_catalog VALUES (?, ?)',
                        (metadata['game_id'], json.dumps(metadata)))
 
+    def save_batch(self, matches):
+        with self.lock, sqlite3.connect(self.catalog_path, timeout=30) as db:
+            db.executemany('INSERT INTO match_catalog VALUES (?, ?)',
+                           [(m['game_id'], json.dumps(m)) for m in matches])
+
     def metadata(self, game_id):
         with sqlite3.connect(self.catalog_path, timeout=30) as db:
             row=db.execute('SELECT metadata FROM match_catalog WHERE game_id=?',(game_id,)).fetchone()
@@ -82,7 +87,12 @@ class ReplayStore:
             if meta["status"] in ("queued", "running"):
                 replay = self.replay(meta["game_id"])
                 if replay:
-                    meta.update(status=replay["result"]["status"], replay_available=True)
+                    # A worker may have saved the recording just before the
+                    # server stopped, without updating the catalog yet.
+                    meta.update(replay.get('metadata', {}))
+                    meta.update(status=replay["result"]["status"],
+                                winner=replay['result'].get('winner'),
+                                reason=replay['result'].get('reason'), replay_available=True)
                 else:
                     meta.update(status="failed", reason="Server stopped before this recording was saved.")
                 self.save_metadata(meta)

@@ -92,6 +92,7 @@ def test_room_roundtrip_preserves_versions_and_selection_clears_ready():
         assert client.post('/bots/upload', json=payload).status_code == 200
         assert client.post('/bots/upload', json=payload).status_code == 409
         assert client.post(f'/rooms/{rid}/attach-bot', json={"player_name": who, **payload}).status_code == 200
+    for who in ["A", "B", "C", "D"]:
         assert client.post(f'/rooms/{rid}/ready', json={"player_name": who}).status_code == 200
     loaded = client.get(f'/rooms/{rid}').json()["room"]
     assert all(s["bot_runner"] and s["ready"] for s in loaded["seats"])
@@ -125,6 +126,7 @@ def test_worker_does_not_block_api_and_replay_is_available_only_when_saved(monke
         bot = f"async-{who}"
         client.post('/bots/upload', json={"bot_name": bot, "bot_version": "v1", "use_sandbox": True, "bot_code": code})
         client.post(f'/rooms/{rid}/attach-bot', json={"player_name": who, "bot_name": bot})
+    for who in names:
         client.post(f'/rooms/{rid}/ready', json={"player_name": who})
     gid = client.post(f'/rooms/{rid}/start-game', json={"seed": 42}).json()["game_id"]
     try:

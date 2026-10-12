@@ -1,7 +1,7 @@
 """Local replay-first platform: submit, simulate in a worker, watch later."""
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from datetime import datetime, timezone
 import logging
 import os
@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, conint
 
 from ..simulator.types.identifiers import PlayerId
 from .bot_registry import BotRegistry
@@ -34,6 +34,7 @@ from .room_service import RoomService
 from .auth import AuthService
 from .builtin_players import catalog as builtin_catalog, package as builtin_package
 from .database import RoomAccess, Bot, RemovedBot
+from .room_batches import ACTIVE, FairMatchQueue, aggregate, group_batches
 
 DATABASE_URL = os.getenv("CATAN_DB_URL", "sqlite:///catan_platform.db")
 default_replays = (DATABASE_URL.removeprefix("sqlite:///") + ".replays"
@@ -45,10 +46,13 @@ room_service = RoomService(use_database=True, database_url=DATABASE_URL)
 bot_registry = BotRegistry(use_database=True, database_url=DATABASE_URL)
 auth_service = AuthService(DATABASE_URL)
 AUTH_REQUIRED = os.getenv("CATAN_AUTH_REQUIRED", "0").lower() not in ("0", "false", "no")
-for _old_game in store.list_games():
-    if _old_game.get("room_id") and _old_game["status"] not in ("queued", "running"):
-        room_service.room_repository.update_room_status(_old_game["room_id"], "finished")
-workers = ThreadPoolExecutor(max_workers=2, thread_name_prefix="catan-match")
+# recover() has ended every job from the previous server process. Reopen legacy
+# rooms too, including ones that predate saved replay metadata.
+for _old_room in room_service.list_rooms():
+    if _old_room['status'] in ('playing', 'finished'):
+        room_service.room_repository.update_room_status(_old_room['room_id'], 'waiting')
+workers = FairMatchQueue(max_workers=2)
+MAX_BATCH_SIZE = min(100, max(1, int(os.getenv('CATAN_MAX_BATCH_SIZE', '10'))))
 mutation_lock = threading.RLock()
 app = FastAPI(title="Catan replay studio")
 frontend_origins = [origin.strip().rstrip("/") for origin in
@@ -95,7 +99,10 @@ class AttachBotRequest(RoomJoinRequest):
 
 
 class StartGameRequest(BaseModel):
-    seed: int = Field(default=42, ge=0, le=2**31 - 1)
+    seed: conint(strict=True, ge=0, le=2**31 - 1) = 42
+    count: conint(strict=True, ge=1, le=MAX_BATCH_SIZE) = 1
+    rotate_seats: bool = False
+    rematch_of: str | None = None
 
 
 class BuiltinSeatRequest(BaseModel):
@@ -243,8 +250,11 @@ def account_stats(request: Request):
 def _run_match(metadata, packages):
     process=None
     try:
-        metadata.update(status='running',started_at=now())
-        store.save_metadata(metadata)
+        with mutation_lock:
+            metadata=store.metadata(metadata['game_id'])
+            if metadata['status'] == 'cancelled': return
+            metadata.update(status='running',started_at=now())
+            store.save_metadata(metadata)
         job={'metadata':metadata,'replay_directory':str(store.directory.resolve()),
              'catalog_path':str(Path(store.catalog_path).resolve()),
              'packages':[{'builtin': p.metadata['builtin']} if p.metadata.get('builtin') else
@@ -269,19 +279,60 @@ def _run_match(metadata, packages):
         store.save_metadata(metadata)
     finally:
         if metadata.get('room_id'):
-            room_service.room_repository.update_room_status(metadata['room_id'],'finished')
+            with mutation_lock:
+                release_room(metadata['room_id'])
 
 
-def launch(seed, participants, packages, room_id=None, room_name=None):
-    game_id = f"game-{uuid.uuid4().hex}"
-    metadata = {"game_id": game_id, "seed": seed, "room_id": room_id, "room_name": room_name,
-                "players": [p["name"] for p in participants], "participants": participants,
-                "status": "queued", "created_at": now(), "winner": None, "replay_available": False}
-    metadata.update(room_access(room_id) if room_id else {'private': False, 'owner_id': None})
-    metadata["implementation_hashes"] = [p.metadata.get('sha256') or hashlib.sha256(p.bot_code.encode()).hexdigest() for p in packages]
-    store.save_metadata(metadata)
-    workers.submit(_run_match, dict(metadata), packages)
-    return {"game_id": game_id, "room_id": room_id}
+def room_matches(room_id):
+    return [g for g in store.list_games() if g.get('room_id') == room_id]
+
+
+def release_room(room_id):
+    if not any(g['status'] in ACTIVE for g in room_matches(room_id)):
+        room_service.room_repository.update_room_status(room_id,'waiting')
+
+
+def require_host(room, user, access):
+    if user is None and access['owner_id']:
+        raise HTTPException(401,'Sign in as the room creator')
+    if user and (access['owner_id'] != user['user_id'] if access['owner_id'] else
+                 not any(s.user_id == user['user_id'] and s.player_name == room.created_by for s in room.seats)):
+        raise HTTPException(403,'Only the room creator can launch or cancel matches')
+
+
+def same_lineup(room, game):
+    expected = sorted((p.get('room_seat') or int(p['player_id'][1:]),p.get('user_id'),p['name'],p['bot_id'])
+                      for p in game['participants'])
+    actual = [(i+1,s.user_id,s.player_name,s.to_dict()['bot_runner']) for i,s in enumerate(room.seats)]
+    return actual == expected
+
+
+def launch(seed, participants, packages, room_id, room_name, count=1, rotate_seats=False, rematch_of=None):
+    if seed + count - 1 > 2**31 - 1:
+        raise ValueError('The starting seed plus match count exceeds the maximum seed')
+    previous=room_matches(room_id)
+    batch_id=f'batch-{uuid.uuid4().hex}'
+    batch_number=max((g.get('batch_number',0) for g in previous),default=0)+1
+    first_number=max(len(previous),max((g.get('room_match_number',0) for g in previous),default=0))+1
+    matches,jobs=[],[]
+    for index in range(count):
+        offset=index%4 if rotate_seats else 0
+        lineup=deepcopy(participants[offset:]+participants[:offset])
+        ordered_packages=packages[offset:]+packages[:offset]
+        for pid,participant in zip(PlayerId.all_players(),lineup): participant['player_id']=pid.value
+        metadata={'game_id':f'game-{uuid.uuid4().hex}','seed':seed+index,'room_id':room_id,'room_name':room_name,
+            'players':[p['name'] for p in lineup],'participants':lineup,'status':'queued','created_at':now(),
+            'winner':None,'replay_available':False,'batch_id':batch_id,'batch_number':batch_number,
+            'batch_index':index+1,'batch_count':count,'room_match_number':first_number+index,
+            'rotate_seats':rotate_seats,'rematch_of':rematch_of}
+        metadata.update(room_access(room_id))
+        metadata['implementation_hashes']=[p.metadata.get('sha256') or hashlib.sha256(p.bot_code.encode()).hexdigest() for p in ordered_packages]
+        matches.append(metadata);jobs.append((dict(metadata),ordered_packages))
+    store.save_batch(matches)
+    room_service.start_game(room_id)
+    workers.submit_batch(_run_match,jobs)
+    return {'game_id':matches[0]['game_id'],'game_ids':[g['game_id'] for g in matches],
+            'room_id':room_id,'batch_id':batch_id,'count':count}
 
 
 @lru_cache(maxsize=1)
@@ -373,9 +424,55 @@ def get_room(room_id: str, request: Request):
     access = check_room(room_id, request)
     room = room_service.get_room(room_id).to_dict()
     room.update(access)
-    matches = [g for g in store.list_games() if g.get("room_id") == room_id]
+    matches = room_matches(room_id)
     room["game"] = matches[0] if matches else None
+    room['matches']=matches
+    room['batches']=group_batches(matches)
+    room['batch_limit']=MAX_BATCH_SIZE
     return {"room": room}
+
+
+@app.get('/rooms/{room_id}/statistics')
+def room_statistics(room_id: str, request: Request, batch_id: str | None = None):
+    check_room(room_id,request)
+    room_service.get_room(room_id)
+    games=room_matches(room_id)
+    if batch_id:
+        games=[g for g in games if (g.get('batch_id') or g['game_id']) == batch_id]
+        if not games: raise HTTPException(404,'This batch was not found in this room')
+    return {'room_id':room_id,'batch_id':batch_id,**aggregate(games,store)}
+
+
+@app.get('/games/{game_id}/batch')
+def match_batch(game_id: str, request: Request):
+    game=check_game(game_id,request)
+    games=[g for g in room_matches(game['room_id']) if g.get('batch_id') == game.get('batch_id')] if game.get('batch_id') else [game]
+    games.sort(key=lambda g:g.get('batch_index',1))
+    room=room_service.get_room(game['room_id']) if game.get('room_id') else None
+    user=current_user(request,required=False)
+    access=room_access(game['room_id']) if room else {}
+    host=bool(room and user and (user['user_id']==access.get('owner_id') or
+        (not access.get('owner_id') and any(s.user_id==user['user_id'] and s.player_name==room.created_by for s in room.seats))))
+    return {'matches':games,'can_rematch':bool(host and room.is_ready() and same_lineup(room,game)),
+            'room_id':game.get('room_id'),'room_busy':bool(room and room.status=='playing')}
+
+
+@app.post('/rooms/{room_id}/batches/{batch_id}/cancel')
+def cancel_batch(room_id: str, batch_id: str, request: Request):
+    access=check_room(room_id,request)
+    user=current_user(request)
+    with mutation_lock:
+        room=room_service.get_room(room_id)
+        require_host(room,user,access)
+        games=[g for g in room_matches(room_id) if g.get('batch_id') == batch_id]
+        if not games: raise HTTPException(404,'This batch was not found in this room')
+        cancelled=0
+        for game in games:
+            if game['status']=='queued':
+                game.update(status='cancelled',finished_at=now(),reason='Cancelled before starting by the room creator.')
+                store.save_metadata(game);cancelled+=1
+        release_room(room_id)
+        return {'cancelled':cancelled,'message':'Running matches finish normally; unstarted matches are cancelled.'}
 
 
 @app.post("/rooms")
@@ -443,21 +540,33 @@ def attach_bot(room_id: str, payload: AttachBotRequest, request: Request):
 
 @app.post("/rooms/{room_id}/start-game")
 def start_room_game(room_id: str, payload: StartGameRequest, request: Request):
-    check_room(room_id, request)
+    access=check_room(room_id, request)
     user = current_user(request)
     with mutation_lock:
         room = room_service.get_room(room_id)
-        if user and not any(s.user_id == user["user_id"] for s in room.seats):
-            raise HTTPException(403, "Join this room before starting its match")
+        require_host(room,user,access)
+        if any(g['status'] in ACTIVE for g in room_matches(room_id)):
+            raise ValueError('This room already has a batch in progress')
+        if room.status in ('playing','finished'):
+            release_room(room_id)
+            room=room_service.get_room(room_id)
         if not room.is_ready():
             raise ValueError("All four seats need a valid bot and must be ready")
         packages = [require_bot(s.to_dict()["bot_runner"]) for s in room.seats]
         participants = [{"player_id": pid.value, "name": s.player_name, "bot_id": b.bot_id,
                          "bot_name": b.name, "bot_version": b.version, "color": s.color,
-                         "user_id": s.user_id}
-                        for pid, s, b in zip(PlayerId.all_players(), room.seats, packages)]
-        room_service.start_game(room_id)
-        return launch(payload.seed, participants, packages, room_id, room.name)
+                         "user_id": s.user_id,'room_seat':index+1}
+                        for index,(pid, s, b) in enumerate(zip(PlayerId.all_players(), room.seats, packages))]
+        if payload.rematch_of:
+            old=check_game(payload.rematch_of,request)
+            if old.get('room_id') != room_id or not same_lineup(room,old):
+                raise HTTPException(409,'The lineup changed. Return to the room and run its current ready players.')
+            if payload.count != 1 or payload.rotate_seats:
+                raise ValueError('A rematch runs one match with the original seat order')
+            participants=deepcopy(old['participants'])
+            packages=[require_bot(p['bot_id']) for p in participants]
+        return launch(payload.seed, participants, packages, room_id, room.name,
+                      payload.count,payload.rotate_seats,payload.rematch_of)
 
 
 @app.get("/bots")
@@ -478,6 +587,8 @@ def update_builtin(room_id, seat_index, difficulty):
     seat = room.seats[seat_index]
     if seat.player_name and not str(seat.to_dict()['bot_runner']).startswith('builtin-'):
         raise ValueError('Only empty or built-in seats can be changed')
+    new_id=f'builtin-{difficulty}-v1' if difficulty is not None else None
+    if seat.to_dict()['bot_runner'] != new_id: room.clear_lineup_readiness()
     if difficulty is None:
         seat.player_name = None
         seat.bot_runner = None
@@ -516,9 +627,9 @@ def test_player(payload: TestPlayerRequest, request: Request):
         room = room_service.create_room(f'Test {package.name}', user['username'], user['user_id'])
         save_access(room.room_id, user, True)
         room_service.attach_bot(room.room_id, user['username'], BotRunner(bot_id=package.bot_id, name=package.name, version=package.version))
-        room_service.set_ready(room.room_id, user['username'], True)
         for index in range(1, 4):
             room = update_builtin(room.room_id, index, payload.difficulty)
+        room=room_service.set_ready(room.room_id, user['username'], True)
         result = room.to_dict()
         result.update(room_access(room.room_id))
         return {'room': result}

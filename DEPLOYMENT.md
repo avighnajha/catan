@@ -10,6 +10,8 @@ curl http://127.0.0.1/health
 
 The Compose service binds FastAPI to `127.0.0.1:8000`; Caddy terminates public HTTPS. `CATAN_FRONTEND_ORIGINS` must contain the Vercel origin. `CATAN_AUTH_REQUIRED` defaults to `1` in Docker and must remain enabled in production so bot uploads and lobby mutations require a signed-in account.
 
+Room batches default to at most 10 matches (`CATAN_MAX_BATCH_SIZE=10` in the Compose environment; configurable from 1–100). Keep the default initially on the VPS. The shared queue runs at most two isolated matches at once and shares capacity between rooms; increasing the batch limit does not increase concurrency. Run one API process so this limit and room locks remain shared. After a restart, unfinished jobs are marked failed, saved recordings remain available, and rooms can run again.
+
 Accounts, PBKDF2 password hashes, hashed login sessions, bot ownership, rooms, and the match catalog live in `/data/catan.db`. Replay files live in `/data/replays`. Both are covered by the persistent `catan-data` volume; back it up before server migrations.
 
 Uploaded Player implementations execute in child processes with time and resource limits, but they are executable Python and are not a security boundary against a hostile author. Deploy this service for trusted participants. Public untrusted submissions require a separate locked-down runner host or per-match sandbox with no access to the application data volume.

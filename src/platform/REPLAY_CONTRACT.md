@@ -2,6 +2,12 @@
 
 `GET /games` lists saved job metadata. Matches use `POST /rooms/{id}/start-game` with JSON `{ "seed": 42 }` after four validated Player selections and ready checks.
 
+The same endpoint accepts `count` (1–10 by default) and `rotate_seats` (default false). It returns the first `game_id`, all `game_ids`, `batch_id`, `count` and `room_id`. All seeds and participant/version/seat snapshots are saved before scheduling; seeds are `seed + index`. Optional `rematch_of` runs one match with that saved match's seat order, requiring the current ready lineup to match. Only the creator launches/cancels account-owned rooms. A room returns to `waiting` after its pending matches finish; readiness remains valid until the lineup changes.
+
+`GET /rooms/{id}` includes `matches`, grouped `batches`, and `batch_limit`. `GET /rooms/{id}/statistics?batch_id=...` aggregates recorded metrics by participant identity and bot version; omit the query for room totals. `GET /games/{id}/batch` lists sibling matches and reports whether the current user can rematch. `POST /rooms/{id}/batches/{batch_id}/cancel` cancels only jobs still queued. Cancelled metadata remains visible with no replay; running jobs are left intact. History/statistics/sibling navigation follow the same private-room access rules as replays.
+
+New match metadata additionally contains `batch_id`, `batch_number`, `batch_index`, `batch_count`, `room_match_number`, `rotate_seats`, `rematch_of`, and a finished `summary`. Participants retain `room_seat` across seat rotation. Summaries contain final points (including hidden VP after the match), final roads/settlements/cities, settlements built including setup, and development cards played. These are post-game evaluation data, never player observations. Legacy recordings without summaries use their recorded public VP and mark `score_visibility: public`; missing recordings do not contribute invented zero metrics. Restart recovery marks unfinished batch jobs failed and retains their history.
+
 `GET /games/{id}` returns status and `replay_available`. A `queued` or `running` job has no readable replay yet. `GET /game/{id}/replay` returns HTTP 409 until saved, or 404 for an unknown ID. No live game stream is needed. Once ready, this returns:
 
 ```text

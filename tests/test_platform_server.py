@@ -37,6 +37,7 @@ def create_game(seed=42):
         bot = f"player-{name}"
         assert client.post("/bots/upload", json=player_payload(bot)).status_code == 200
         assert client.post(f"/rooms/{room_id}/attach-bot", json={"player_name": name, "bot_name": bot}).status_code == 200
+    for name in names:
         assert client.post(f"/rooms/{room_id}/ready", json={"player_name": name, "ready": True}).status_code == 200
     return client.post(f"/rooms/{room_id}/start-game", json={"seed": seed})
 
@@ -108,6 +109,7 @@ def test_room_can_start_game_when_ready():
         assert registered.status_code == 200
         attach = client.post(f"/rooms/{room_id}/attach-bot", json={"player_name": player, "bot_name": f"bot-{player.lower()}"})
         assert attach.status_code == 200
+    for player in ["Alice", "Bob", "Carol", "Dave"]:
         ready = client.post(f"/rooms/{room_id}/ready", json={"player_name": player, "ready": True})
         assert ready.status_code == 200
 
@@ -116,7 +118,7 @@ def test_room_can_start_game_when_ready():
     assert "game_id" in started.json()
     metadata = wait_for_recording(started.json()["game_id"])
     assert [p["bot_id"] for p in metadata["participants"]] == [f"bot-{n}-v1" for n in ["alice", "bob", "carol", "dave"]]
-    assert client.post(f"/rooms/{room_id}/start-game", json={"seed": 123}).status_code == 400
+    assert client.post(f"/rooms/{room_id}/start-game", json={"seed": 124}).status_code == 200
 
 
 def test_list_and_upload_bot_registry():

@@ -1,6 +1,7 @@
 import {Board, renderTopology, playerColors} from './board.js';
 import {Playback} from './playback.js';
 import {developmentCardReport,mountResourceReport} from './report.js';
+import {roomControls,roomHistory,statisticsReport,matchNavigation} from './room-report.js';
 
 const app=document.querySelector('#app'), modal=document.querySelector('#modal');
 const accountName=document.querySelector('#accountName'),accountButton=document.querySelector('#accountButton');
@@ -11,13 +12,14 @@ let routeVersion=0,pollTimer=null,playTimer=null,viewer=null,noticeTimer=null,ro
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const path=s=>encodeURIComponent(s);
 const date=s=>new Date(s).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-const badge=s=>`<span class="badge ${esc(s)}">${esc({queued:'Queued',running:'Simulating',completed:'Finished',stopped:'Run stopped',failed:'Failed',waiting:'Open',playing:'Simulating',finished:'Closed'}[s]||s)}</span>`;
+const badge=s=>`<span class="badge ${esc(s)}">${esc({queued:'Queued',running:'Simulating',completed:'Finished',stopped:'Run stopped',failed:'Failed',waiting:'Open',playing:'Simulating',finished:'Closed',cancelled:'Cancelled'}[s]||s)}</span>`;
 const name=()=>account?.username||'';
 const colors=i=>playerColors[i%4];
 const participantColor=(participants,id,index=0)=>participants.find(p=>p.player_id===id)?.color||colors(index);
 function notify(message){const el=document.querySelector('#notice');el.textContent=message;el.hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>el.hidden=true,6000);}
 async function api(url,body,method){const headers={'Content-Type':'application/json'};if(authToken)headers.Authorization=`Bearer ${authToken}`;const r=await fetch(apiUrl(url),body===undefined?{method:method||'GET',headers}:{method:method||'POST',headers,body:JSON.stringify(body)});let data;try{data=await r.json();}catch{throw Error('The server returned an unreadable response.');}if(!r.ok){if(r.status===401&&authToken){authToken='';account=null;localStorage.removeItem('catan-session');paintAccount();}const d=data.detail;throw Error(Array.isArray(d)?d.map(x=>x.msg).join('; '):d||'Request failed');}return data;}
-function dialog(title,html){document.querySelector('#modalTitle').textContent=title;document.querySelector('#modalBody').innerHTML=html;modal.showModal();}
+function randomSeed(exclude=-1){const seed=crypto.getRandomValues(new Uint32Array(1))[0]%2147483638;return seed===Number(exclude)?(seed+1)%2147483638:seed;}
+function dialog(title,html){modal.classList.remove('statistics-modal');document.querySelector('#modalTitle').textContent=title;document.querySelector('#modalBody').innerHTML=html;modal.showModal();}
 document.querySelector('#closeModal').onclick=()=>modal.close();
 modal.addEventListener('click',e=>{if(e.target===modal&&e.clientX<modal.getBoundingClientRect().left)modal.close();});
 function paintAccount(){accountName.textContent=account?.username||'Guest';accountButton.textContent=account?'Sign out':'Sign in';}
@@ -40,30 +42,36 @@ async function matches(version){
 }
 
 async function rooms(version){const {rooms:roomList}=await api('/rooms');if(version!==routeVersion)return;
-  app.innerHTML=`<div class="page-head"><div><div class="eyebrow">Gather at the table</div><h1>Rooms</h1><p class="muted">Four seats. Four players. One recorded match.</p></div><button class="primary" data-action="createRoom">+ Create room</button></div>
+  app.innerHTML=`<div class="page-head"><div><div class="eyebrow">Gather at the table</div><h1>Rooms</h1><p class="muted">Four seats. Reusable tables. Single matches or batches.</p></div><button class="primary" data-action="createRoom">+ Create room</button></div>
   ${roomList.length?`<div class="cards">${roomList.map(r=>`<article class="card"><div class="card-top">${badge(r.status)}<span class="muted">${r.seats.filter(s=>s.player_name).length}/4 seats</span></div><h2>${esc(r.name)}</h2><p class="muted">Hosted by ${esc(r.created_by)}${r.private?' · Private':''}</p><div class="mini-players">${r.seats.map((s,i)=>`<span class="mini-player"><i class="dot" style="background:${s.player_name?esc(s.color||colors(i)):'#ccd4c8'}"></i>${esc(s.player_name||'Empty')}</span>`).join(' · ')}</div><a href="#room/${path(r.room_id)}"><button>Open room →</button></a></article>`).join('')}</div>`:`<div class="empty"><h2>A table is waiting to be made.</h2><p class="muted">Create a room and share its link with the other participants.</p><button data-action="createRoom" class="primary">Create a room</button></div>`}`;
   bindActions();later(()=>rooms(version),version);
 }
 
 async function room(id,version){const [{room:r},{bots}]=await Promise.all([api(`/rooms/${path(id)}`),api('/bots')]);if(version!==routeVersion)return;
   const signature=JSON.stringify([r,bots,name()]);
-  if(signature===roomSignature||(roomSignature&&app.contains(document.activeElement)&&['INPUT','SELECT'].includes(document.activeElement.tagName))){scheduleRoom(id,version);return;}
+  const focusedInput=app.contains(document.activeElement)&&document.activeElement.tagName==='INPUT'?document.activeElement.id:null;
+  if(signature===roomSignature||(roomSignature&&app.contains(document.activeElement)&&document.activeElement.tagName==='SELECT')){scheduleRoom(id,version);return;}
   const savedSeed=document.querySelector('#roomSeed')?.value||sessionStorage.getItem(`seed-${id}`)||'42';
   roomSignature=signature;
   const mine=r.seats.find(s=>s.player_name===name()),valid=bots.filter(b=>b.validated),ready=r.seats.filter(s=>s.ready).length;
-  const waiting=r.status==='waiting',host=account?.user_id===r.owner_id;
+  const waiting=r.status==='waiting',host=Boolean(account&&(account.user_id===r.owner_id||(!r.owner_id&&r.created_by===name())));
+  const savedCount=document.querySelector('#roomCount')?.value||sessionStorage.getItem(`count-${id}`)||'1';
+  const savedRotate=document.querySelector('#roomRotate')?.checked??(sessionStorage.getItem(`rotate-${id}`)==='true');
   app.innerHTML=`<a class="back" href="#rooms">← All rooms</a><div class="page-head"><div><div class="eyebrow">The lobby</div><h1>${esc(r.name)}</h1><p class="muted">Hosted by ${esc(r.created_by)} · ${ready} of 4 ready</p></div><div class="actions">${badge(r.status)}<button data-action="shareRoom">Copy room link</button></div></div>
   <div class="seat-grid">${r.seats.map((s,i)=>`<article class="card seat" style="--seat-color:${s.player_name?esc(s.color||colors(i)):'#cbd5c4'}"><div class="seat-no">SEAT 0${i+1} · ${s.ready?'READY':s.player_name?'CHOOSING A PLAYER':'OPEN'}</div><div class="avatar">${esc((s.player_name||'?')[0].toUpperCase())}</div><h2>${esc(s.player_name||'An open seat')}</h2><p class="muted">${s.bot_runner?esc(s.bot_runner):s.player_name?'No player selected yet':'Join with your own player.'}</p>
   ${waiting&&s.player_name===name()?`<label>Player version<select data-seat-bot="${esc(id)}"><option value="">Choose a player…</option>${valid.map(b=>`<option value="${esc(b.bot_id)}" ${b.bot_id===s.bot_runner?'selected':''}>${esc(b.name)} · ${esc(b.version)}</option>`).join('')}</select></label><div class="actions"><button class="${s.ready?'':'primary'}" data-action="ready" data-room="${esc(id)}" data-ready="${!s.ready}" ${!s.bot_runner?'disabled':''}>${s.ready?'Not ready':'Mark ready'}</button></div>`:''}
   ${waiting&&host&&(!s.player_name||s.bot_runner?.startsWith('builtin-'))?`<label>Simulation bot<select data-builtin-seat="${i}"><option value="">Empty seat</option>${['easy','medium','hard'].map(level=>`<option value="${level}" ${s.bot_runner===`builtin-${level}-v1`?'selected':''}>${level[0].toUpperCase()+level.slice(1)} bot</option>`).join('')}</select></label>`:''}
   ${waiting&&!s.player_name&&!mine?`<div class="actions"><button data-action="join" data-room="${esc(id)}">Join this room</button></div>`:''}</article>`).join('')}</div>
-  ${waiting?`<div class="lobby-bar"><div><h3>${ready===4?'Everyone is ready.':'Waiting for the table.'}</h3><p class="muted" style="margin:0">Each seat needs a valid Player selection and a ready check.</p></div><div class="actions"><label>Seed<input id="roomSeed" type="number" value="42" min="0" max="2147483647"></label><button data-action="start" data-room="${esc(id)}" class="primary" ${ready!==4?'disabled':''}>Simulate match →</button></div></div>`:r.game?`<div class="lobby-bar"><div><h3>${r.game.replay_available?'Your recording is ready.':r.game.status==='failed'?'The simulation failed.':'The simulation is running.'}</h3><p class="muted" style="margin:0">${r.game.replay_available?'Everyone can watch at their own pace.':r.game.status==='failed'?esc(r.game.reason):'You can close this page and return later.'}</p></div><a href="#match/${path(r.game.game_id)}"><button class="primary">${r.game.replay_available?'Watch match':'View progress'} →</button></a></div>`:`<div class="note">This older room has no saved recording. Create a new room to run a match.</div>`}
+  ${roomControls(r,host,ready)}${roomHistory(r,host)}
   ${!valid.length?'<div class="note">No valid bots yet. <a class="notice-link" href="#bots">Add a bot version</a> to get started.</div>':''}
   <p class="muted">${r.private?'Private room · only you can access this room and its recordings.':'Public room · invite other players or fill empty seats with simulation bots.'}</p>`;
   const seedInput=document.querySelector('#roomSeed');if(seedInput){seedInput.value=savedSeed;seedInput.oninput=()=>sessionStorage.setItem(`seed-${id}`,seedInput.value);}
+  const countInput=document.querySelector('#roomCount'),rotateInput=document.querySelector('#roomRotate');
+  if(countInput){countInput.value=savedCount;countInput.oninput=()=>{sessionStorage.setItem(`count-${id}`,countInput.value);document.querySelector('[data-action=start]').textContent=Number(countInput.value)===1?'Simulate match →':`Run ${countInput.value} matches →`;};countInput.oninput();rotateInput.checked=savedRotate;rotateInput.onchange=()=>sessionStorage.setItem(`rotate-${id}`,rotateInput.checked);}
   bindActions();app.querySelectorAll('[data-seat-bot]').forEach(el=>el.onchange=async()=>{const b=valid.find(b=>b.bot_id===el.value);if(!b)return;try{await api(`/rooms/${path(id)}/attach-bot`,{player_name:name(),bot_name:b.bot_id,bot_version:b.version});el.blur();await room(id,version);}catch(e){notify(e.message);}});
   scheduleRoom(id,version);
   app.querySelectorAll('[data-builtin-seat]').forEach(el=>el.onchange=async()=>{try{await api(`/rooms/${path(id)}/builtin-bot`,{seat:Number(el.dataset.builtinSeat),difficulty:el.value||null});roomSignature=null;await room(id,version);}catch(e){notify(e.message);}});
+  if(focusedInput)document.getElementById(focusedInput)?.focus();
 }
 function scheduleRoom(id,version){later(()=>room(id,version),version);}
 
@@ -88,8 +96,25 @@ function describe(frame,previous,participants){
 }
 
 function errorLogButton(meta,id){return account&&(meta.status==='failed'||meta.error_players?.length)&&meta.participants?.some(p=>p.user_id===account.user_id)?`<button data-action="matchErrors" data-id="${esc(id)}">Player error log</button>`:'';}
+async function loadMatchNavigation(meta,version){
+  if(!meta.room_id)return;
+  try{
+    const batch=await api(`/games/${path(meta.game_id)}/batch`);if(version!==routeVersion)return;
+    if(!document.querySelector('.batch-match-layout')){
+      const layout=document.createElement('div'),content=document.createElement('div'),sidebar=document.createElement('aside');
+      layout.className='batch-match-layout';content.className='batch-match-content';sidebar.id='batchNavigation';
+      while(app.firstChild)content.append(app.firstChild);
+      layout.append(sidebar,content);app.append(layout);
+      const controls=document.createElement('div');controls.id='rematchControls';controls.className='lobby-bar';content.append(controls);
+    }
+    document.querySelector('#batchNavigation').innerHTML=matchNavigation(meta,batch);
+    document.querySelector('#rematchControls').innerHTML=`<div><a class="notice-link" href="#room/${path(meta.room_id)}">← Back to room and statistics</a><p class="muted">${batch.can_rematch?'Run this exact lineup again.':'The room creator can rematch when this lineup is ready and no batch is running.'}</p></div><div class="actions"><button data-action="rematch" data-room="${esc(meta.room_id)}" data-id="${esc(meta.game_id)}" data-seed="new" data-original-seed="${meta.seed}" ${batch.can_rematch?'':'disabled'}>Rematch with new seed</button><button data-action="rematch" data-room="${esc(meta.room_id)}" data-id="${esc(meta.game_id)}" data-seed="${meta.seed}" ${batch.can_rematch?'':'disabled'}>Replay same seed</button></div>`;
+    bindActions(document.querySelector('#rematchControls'));
+    if(meta.replay_available&&(batch.room_busy||batch.matches.some(g=>['queued','running'].includes(g.status))))later(()=>loadMatchNavigation(meta,version),version);
+  }catch(error){if(meta.batch_id&&version===routeVersion)notify(error.message);}
+}
 async function match(id,version){const demo=id==='demo';let replay=demo?await api('/demo/replay'):null;const meta=demo?replay.metadata:await api(`/games/${path(id)}`);if(version!==routeVersion)return;
-  if(!meta.replay_available){app.innerHTML=`<a class="back" href="#matches">← Match archive</a><div class="empty">${['running','queued'].includes(meta.status)?'<div class="spinner"></div>':''}<div class="eyebrow">Seed ${esc(meta.seed)}</div><h1>${meta.status==='failed'?'This run could not finish.':'Your bots are at the table.'}</h1><p class="muted">${meta.status==='failed'?esc(meta.reason):'The match is being simulated in the background. You can leave and come back; the recording will be here when it is ready.'}</p>${badge(meta.status)}${errorLogButton(meta,id)}<p class="muted">${meta.players.map(esc).join(' · ')}</p><a href="#matches"><button>Back to matches</button></a></div>`;if(['running','queued'].includes(meta.status))later(()=>match(id,version),version);return;}
+  if(!meta.replay_available){app.innerHTML=`<a class="back" href="#matches">← Match archive</a><div class="empty">${['running','queued'].includes(meta.status)?'<div class="spinner"></div>':''}<div class="eyebrow">Seed ${esc(meta.seed)}</div><h1>${meta.status==='cancelled'?'This match was cancelled.':meta.status==='failed'?'This run could not finish.':'Your bots are at the table.'}</h1><p class="muted">${['failed','cancelled'].includes(meta.status)?esc(meta.reason):'The match is being simulated in the background. You can leave and come back; the recording will be here when it is ready.'}</p>${badge(meta.status)}${errorLogButton(meta,id)}<p class="muted">${meta.players.map(esc).join(' · ')}</p><a href="#matches"><button>Back to matches</button></a></div>`;loadMatchNavigation(meta,version);if(['running','queued'].includes(meta.status))later(()=>match(id,version),version);return;}
   if(!demo)replay=await api(`/game/${path(id)}/replay`);if(version!==routeVersion)return;
   if(replay.schema_version!==1||!replay.frames?.length)throw Error('This recording does not contain a supported board replay.');
   const participants=meta.participants||[], frames=replay.frames;
@@ -115,6 +140,7 @@ async function match(id,version){const demo=id==='demo';let replay=demo?await ap
   frames.forEach((f,i)=>{if(f.state.turn_number===last)return;last=f.state.turn_number;const b=document.createElement('button');b.style.left=`${i/(frames.length-1||1)*100}%`;b.textContent=last;b.title=`Jump to turn ${last}`;b.setAttribute('aria-label',b.title);b.onclick=()=>jump(()=>viewer.playback.seek(i));markers.append(b);});
   if(replay.geometry.valid_hex_topology)document.querySelector('#topology').hidden=true;
   paint();
+  loadMatchNavigation(meta,version);
 }
 
 function paint(){if(!viewer)return;const {playback:p,board,replay,participants}=viewer;const frame=p.frames[p.index],state=frame.state;
@@ -153,7 +179,12 @@ const actions={
   createRoom:()=>{if(!account){authDialog();return;}dialog('Create a room',`<form id="roomForm" class="form-stack"><label>Room name<input name="room" required maxlength="80" placeholder="Sunday strategists"></label><label>Visibility<select name="private"><option value="false">Public</option><option value="true">Private · only me</option></select></label><p class="muted">You take the first seat as ${esc(name())}. Share the room link to invite three more participants.</p><button class="primary" type="submit">Create room</button></form>`);formHandler(document.querySelector('#roomForm'),async f=>{const {room}=await api(`/rooms?${new URLSearchParams({room_name:f.get('room'),private:f.get('private')})}`,{});modal.close();location.hash=`room/${room.room_id}`;});},
   join:async el=>{if(!account){authDialog();return;}await api(`/rooms/${path(el.dataset.room)}/join`,{player_name:name()});await renderRoute();},
   ready:async el=>{await api(`/rooms/${path(el.dataset.room)}/ready`,{player_name:name(),ready:el.dataset.ready==='true'});await renderRoute();},
-  start:async el=>{const input=document.querySelector('#roomSeed');if(!input.reportValidity())return;const g=await api(`/rooms/${path(el.dataset.room)}/start-game`,{seed:Number(input.value)});location.hash=`match/${g.game_id}`;},
+  start:async el=>{const input=document.querySelector('#roomSeed'),count=document.querySelector('#roomCount');if(!input.reportValidity()||!count.reportValidity())return;const g=await api(`/rooms/${path(el.dataset.room)}/start-game`,{seed:Number(input.value),count:Number(count.value),rotate_seats:document.querySelector('#roomRotate').checked});location.hash=`match/${g.game_id}`;},
+  shuffleSeed:()=>{const input=document.querySelector('#roomSeed');input.value=randomSeed(input.value);input.dispatchEvent(new Event('input'));},
+  cancelBatch:async el=>{const result=await api(`/rooms/${path(el.dataset.room)}/batches/${path(el.dataset.batch)}/cancel`,{});notify(result.message);await renderRoute();},
+  roomStats:async el=>{const query=el.dataset.batch?`?batch_id=${path(el.dataset.batch)}`:'';const stats=await api(`/rooms/${path(el.dataset.room)}/statistics${query}`);dialog(el.dataset.batch?'Batch statistics':'Room statistics',statisticsReport(stats));modal.classList.add('statistics-modal');bindActions(document.querySelector('#modalBody'));},
+  closeStats:()=>modal.close(),
+  rematch:async el=>{const seed=el.dataset.seed==='new'?randomSeed(el.dataset.originalSeed):Number(el.dataset.seed);try{const game=await api(`/rooms/${path(el.dataset.room)}/start-game`,{seed,rematch_of:el.dataset.id});location.hash=`match/${game.game_id}`;}catch(error){notify(error.message);location.hash=`room/${el.dataset.room}`;}},
   shareRoom:async()=>{try{await navigator.clipboard.writeText(location.href);notify('Room link copied.');}catch{dialog('Share this room',`<label>Copy this link<input readonly value="${esc(location.href)}"></label>`);}},
   showResults:()=>showResults(),
   download:async el=>{const data=await api(el.dataset.id==='demo'?'/demo/replay':`/game/${path(el.dataset.id)}/replay`);const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`${el.dataset.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},

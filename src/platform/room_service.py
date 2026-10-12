@@ -38,6 +38,10 @@ class Room:
     created_by: Optional[str] = None
     status: str = "waiting"
 
+    def clear_lineup_readiness(self):
+        for seat in self.seats:
+            seat.ready = bool(seat.player_name and str(seat.to_dict()['bot_runner']).startswith('builtin-'))
+
     def join(self, player_name: str, user_id: Optional[str] = None) -> RoomSeat:
         if self.status != "waiting":
             raise ValueError("This room has already started")
@@ -48,7 +52,7 @@ class Room:
                 seat.player_name = player_name
                 seat.user_id = user_id
                 seat.color = PLAYER_COLORS[index]
-                seat.ready = False
+                self.clear_lineup_readiness()
                 return seat
         raise ValueError("Room is full")
 
@@ -217,6 +221,9 @@ class RoomService:
             raise ValueError("This room has already started")
         for idx, seat in enumerate(room.seats):
             if seat.player_name == player_name:
+                new_id=bot_runner if isinstance(bot_runner,str) else bot_runner.bot_id
+                if seat.to_dict()['bot_runner'] != new_id:
+                    room.clear_lineup_readiness()
                 seat.bot_runner = bot_runner
                 seat.ready = False
                 

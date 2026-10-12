@@ -6,6 +6,58 @@ class BrowserPlayer(ExamplePlayer):
     pass
 `;
 
+test('reusable private room runs a batch, navigates matches, shows statistics and rematches',async({page})=>{
+  test.setTimeout(180000);
+  const suffix=Date.now().toString(36),errors=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('/');
+  await register(page,`Batch-${suffix}`,`batch-${suffix}@example.com`);
+  await uploadBot(page,`Batch player ${suffix}`);
+  await page.getByRole('button',{name:'Test your player',exact:true}).click();
+  await page.getByRole('button',{name:'Create private test room',exact:true}).click();
+  await expect(page).toHaveURL(/#room\//);
+  const roomUrl=page.url();
+  await page.getByLabel('Starting seed',{exact:true}).fill('20');
+  await page.getByRole('button',{name:'Shuffle seed',exact:true}).click();
+  await expect(page.getByLabel('Starting seed',{exact:true})).not.toHaveValue('20');
+  await page.getByLabel('Starting seed',{exact:true}).fill('20');
+  await page.getByLabel('Matches',{exact:true}).fill('3');
+  await page.getByLabel('Rotate starting seats',{exact:true}).check();
+  await page.getByRole('button',{name:'Run 3 matches →',exact:true}).click();
+  await expect(page.getByRole('navigation',{name:'Batch matches'}).locator('a')).toHaveCount(3,{timeout:30000});
+  await expect(page.locator('#timeline')).toBeVisible({timeout:90000});
+  const navigation=page.getByRole('navigation',{name:'Batch matches'});
+  await navigation.getByRole('link',{name:/Match 2/}).click();
+  await expect(page.locator('#timeline')).toHaveValue('0',{timeout:90000});
+  await expect(page.locator('[aria-current=page]')).toContainText('Match 2');
+  await expect(page.getByRole('button',{name:'Replay same seed',exact:true})).toBeEnabled({timeout:90000});
+  await page.screenshot({path:'test-results/room-batch-replay.png',fullPage:true});
+  const secondUrl=page.url();
+  await page.goto(roomUrl);
+  await expect(page.locator('.room-history')).toContainText('3 matches');
+  await page.getByRole('button',{name:'Batch statistics',exact:true}).click();
+  await expect(page.locator('#modalBody')).toContainText('3 matches');
+  const breakdown=page.locator('.run-breakdown').first();
+  await breakdown.locator('summary').click();
+  await expect(breakdown.locator('table').last().locator('tbody tr')).toHaveCount(3);
+  await expect(breakdown).toContainText('Settlements built');
+  await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+  await page.screenshot({path:'test-results/room-batch-history.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/room-batch-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:1050});
+  await page.goto(secondUrl);
+  await page.getByRole('button',{name:'Replay same seed',exact:true}).click();
+  await expect(page).not.toHaveURL(secondUrl);
+  await expect(page.getByRole('navigation',{name:'Batch matches'})).toContainText('Seed 21');
+  await expect(page.locator('#timeline')).toBeVisible({timeout:90000});
+  await page.goto(roomUrl);
+  await expect(page.locator('.room-history')).toContainText('4 matches');
+  await expect(page.locator('.batch-history')).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
 test('match report expands played cards and inspects five resources for each player',async({page})=>{
   const {metadata,replay}=completeBoardFixture();
   const events=[
@@ -174,7 +226,7 @@ test('watch the sample, scrub, replay independently, and display responsive resu
   expect(errors).toEqual([]);
 });
 
-test('four participants select a saved bot, ready up and launch a recorded room match',async({page,browser})=>{
+test('four participants select saved bots, ready up and launch a recorded batch',async({page,browser})=>{
   test.setTimeout(120000);
   const suffix=Date.now().toString(36),bot=`Player-${suffix}`;
   await page.goto('/#bots');await register(page,'Alice',`alice-${suffix}@example.com`);
@@ -202,16 +254,28 @@ test('four participants select a saved bot, ready up and launch a recorded room 
       await participant.getByRole('button',{name:'Mark ready',exact:true}).click();
       await expect(participant.getByRole('button',{name:'Not ready',exact:true})).toBeVisible();
     }
-    await page.reload();
-    await expect(page.getByRole('button',{name:'Simulate match →',exact:true})).toBeEnabled();
+    // Changing the lineup clears human readiness; approve the final table.
+    for(const participant of [page,...contexts.map(ctx=>ctx.pages()[0])]){
+      await participant.goto(url);
+      await participant.reload();
+      await expect(participant.locator('[data-seat-bot]')).toBeVisible();
+      const readyButton=participant.getByRole('button',{name:'Mark ready',exact:true});
+      if(await readyButton.isVisible())await readyButton.click();
+      await expect(participant.getByRole('button',{name:'Not ready',exact:true})).toBeVisible();
+      if(participant===page)await page.getByLabel('Matches',{exact:true}).fill('2');
+    }
+    // Readiness continues updating while the host is editing the batch count.
+    await expect(page.getByRole('button',{name:'Run 2 matches →',exact:true})).toBeEnabled();
     await page.screenshot({path:'test-results/room-ready.png',fullPage:true});
-    await page.getByRole('button',{name:'Simulate match →',exact:true}).click();
+    await page.getByRole('button',{name:'Run 2 matches →',exact:true}).click();
     await expect(page.locator('#timeline')).toBeVisible({timeout:30000});
+    await expect(page.getByRole('navigation',{name:'Batch matches'}).locator('a')).toHaveCount(2);
     await expect(page.locator('#players')).toContainText('Alice');
     await expect(page.locator('#players')).toContainText('Dave');
     await expect(page.locator('#players')).toContainText(bot);
     await page.goto(url);
-    await expect(page.getByRole('button',{name:'Watch match →',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Watch match',exact:true}).first()).toBeVisible();
+    await expect(page.locator('.room-history')).toContainText('2 matches');
   }finally{for(const ctx of contexts)await ctx.close();}
 });
 
@@ -227,6 +291,7 @@ test('test your player creates a private room with configurable simulation oppon
   await expect(page.locator('#app')).toContainText('Private room');
   await page.locator('[data-builtin-seat="1"]').selectOption('hard');
   await expect(page.locator('[data-builtin-seat="1"]')).toHaveValue('hard');
+  await page.getByRole('button',{name:'Mark ready',exact:true}).click();
   await page.getByRole('button',{name:'Simulate match →',exact:true}).click();
   await expect(page.locator('#timeline')).toBeVisible({timeout:60000});
   await expect(page.locator('#players')).toContainText('Hard bot');

@@ -41,6 +41,8 @@ def run_job(job):
         metadata.update(engine_version='2.0',protocol_version=1,rules=asdict(sim.config),
                         error_players=sorted({e['player_id'] for e in sim.failures}))
         recording=sim.export_recording(metadata)
+        from .room_batches import summarize_match
+        metadata['summary']=summarize_match(sim,recording)
         # Only the public projection is persisted here. No private callbacks,
         # raw code, or internal decision audit are served as replay data.
         metadata.update(status=recording['result']['status'],winner=recording['result']['winner'],

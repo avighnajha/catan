@@ -9,13 +9,21 @@ python -m pip install -r requirements.txt
 python -m uvicorn src.platform.server:app --host 127.0.0.1 --port 8000
 ```
 
-Open <http://127.0.0.1:8000>. Python runs the application; Node is needed only for browser development/tests. Serve one API process for this local version (do not use multiple Uvicorn workers).
+Open <http://127.0.0.1:8000>. Python runs the application; Node is needed only for browser development/tests. Serve one API process: it owns the shared match queue (do not use multiple Uvicorn workers).
 
-Enter a local player name, upload a Player version under My players, create or join a room, select a version and mark ready. Four ready seats enable **Simulate match**. The recording is available under Matches and from the room afterward.
+Sign in or create an account, upload a Player version under **My bots**, create or join a room, and select a version. Once the final lineup is selected, all human participants mark ready; simulation opponents are automatically ready. Four ready seats allow the room creator to simulate one match or a batch. Recordings remain available under Matches and in the room history.
 
-Local player names are convenience identifiers, not authenticated accounts. This is a local development application, not a public service for untrusted uploads.
+Docker enables authenticated API access with `CATAN_AUTH_REQUIRED=1`. The browser uses accounts in local development too; anonymous API compatibility is available locally unless this setting is enabled.
 
 ## What is implemented
+
+Rooms are reusable for both multiplayer and private practice. Once the lineup is ready, the creator can launch 1–10 matches with a starting seed, shuffle it, or enable seat rotation. Seeds increase by one per match; choose 4 or 8 rotated matches for balanced seat coverage. Participant identities, colours, exact bot versions and seat orders are frozen before enqueueing. Readiness persists across reruns; a changed bot or occupied seat clears all human readiness (simulation opponents are automatically ready). Room controls remain locked while a batch has pending/running matches.
+
+Every room retains all its batches and recordings. Room/batch statistics group by player identity and bot version, not rotated seat, and show wins, recorded final points, roads, final settlements/cities, settlements built including setup, and development cards played. Expand each player for individual games, totals, averages and ranges. Completed matches alone enter the win-rate denominator; missing outcomes never become zero scores. New finished match summaries include final victory points; older recordings can supply only the public score they saved. Private room history and statistics retain owner-only access.
+
+Replay pages include a batch match sidebar, a room link and same-seed/new-seed rematches for the creator when the unchanged lineup is ready. Switching recordings starts playback at the beginning. Rematching a rotated match preserves that match's original seat order. The creator can cancel queued matches while running ones finish normally.
+
+The shared scheduler runs at most two isolated match processes and schedules pending batches round-robin, so one room cannot enqueue 100 jobs ahead of everyone else. The batch limit defaults to 10 (`CATAN_MAX_BATCH_SIZE`, 1–100); raising it does not increase concurrency. Unfinished jobs are marked interrupted after a server restart, preserving history and returning rooms to a reusable state.
 
 In **My bots**, use **Edit** to change a saved player's name or description, or edit/replace its Python source and supply a new version name. Source changes create a new validated version; existing versions and match recordings retain their original implementation. **Remove** asks for confirmation and hides that version from the library and new selections. Original code is retained for existing recordings and queued matches, and removed version IDs cannot be reused. Open rooms selecting a removed version must select another before starting. Only the owner can edit or remove account-owned players.
 

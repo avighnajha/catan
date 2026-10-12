@@ -10,6 +10,7 @@ services:
     environment:
       CATAN_FRONTEND_ORIGINS: "${CATAN_FRONTEND_ORIGINS:-}"
       CATAN_AUTH_REQUIRED: "${CATAN_AUTH_REQUIRED:-1}"
+      CATAN_MAX_BATCH_SIZE: "${CATAN_MAX_BATCH_SIZE:-10}"
     volumes:
       - catan-data:/data
     tmpfs:
