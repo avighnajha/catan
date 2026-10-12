@@ -6,6 +6,7 @@
     "build": "node scripts/build-frontend.mjs",
     "test:playback": "node --test tests/playback.test.js",
     "test:report": "node --test tests/report.test.js",
+    "test:archive": "node --test tests/match-archive.test.js",
     "test:browser": "playwright test"
   },
   "devDependencies": {

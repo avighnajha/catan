@@ -52,6 +52,7 @@ test('reusable private room runs a batch, navigates matches, shows statistics an
   const secondUrl=page.url();
   await page.goto(roomUrl);
   await expect(page.locator('.room-history')).toContainText('3 matches');
+  await expect(page.locator('.batch-history tbody tr td:first-child')).toHaveText(['1','2','3']);
   await page.getByRole('button',{name:'Batch statistics',exact:true}).click();
   await expect(page.locator('#modalBody')).toContainText('3 matches');
   const breakdown=page.locator('.run-breakdown').first();
@@ -119,6 +120,59 @@ test('constant-seed batch settings persist and its private room can be deleted w
   await expect(page.locator('#rematchControls')).toContainText('This room was deleted');
   await expect(page.getByRole('button',{name:'Replay same seed',exact:true})).toHaveCount(0);
   await expect(page.getByRole('navigation',{name:'Batch matches'}).locator('a')).toHaveCount(3);
+});
+
+test('match archive groups dates and batches, preserves expanded sections, and offers a flat view',async({page})=>{
+  const {metadata,replay}=completeBoardFixture();
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  const games=[
+    {...metadata,game_id:'game-fixture',batch_id:'batch-new',batch_number:2,batch_index:1,room_name:'Practice room',created_at:'2026-10-12T12:00:00Z',status:'running'},
+    {...metadata,game_id:'game-second',batch_id:'batch-new',batch_number:2,batch_index:2,room_name:'Practice room',created_at:'2026-10-12T12:00:01Z'},
+    {...metadata,game_id:'game-other',room_id:'another-room',batch_id:'batch-other',batch_number:2,batch_index:1,room_name:'Friends room',created_at:'2026-10-12T10:00:00Z'},
+    {...metadata,game_id:'game-older',batch_id:'batch-old',batch_number:1,batch_index:1,room_name:'Practice room',created_at:'2026-10-10T12:00:00Z'},
+    {...metadata,game_id:'game-legacy',room_name:'Earlier room',created_at:'2026-10-10T10:00:00Z'}
+  ];
+  let refreshes=0;
+  await page.route('**/games',route=>{refreshes++;if(refreshes>1)games[0].status='completed';return route.fulfill({json:{games}});});
+  await page.route('**/games/game-fixture',route=>route.fulfill({json:metadata}));
+  await page.route('**/game/game-fixture/replay',route=>route.fulfill({json:replay}));
+  await page.route('**/games/game-fixture/batch',route=>route.fulfill({json:{room_id:metadata.room_id,matches:games.slice(0,2),can_rematch:false}}));
+  await page.goto('/#matches');
+  await expect(page.getByLabel('View',{exact:true})).toHaveValue('grouped');
+  const dates=page.locator('.archive-date'),latest=dates.first();
+  await expect(dates).toHaveCount(2);
+  await expect(latest.locator(':scope>summary')).toContainText('12 Oct');
+  await expect(dates.last().locator(':scope>summary')).toContainText('10 Oct');
+  await expect(dates.last()).not.toHaveAttribute('open','');
+  const batch=latest.locator('.archive-batch').first();
+  await expect(batch.locator(':scope>summary')).toContainText('Batch 2');
+  await expect(batch.locator(':scope>summary')).toContainText('Practice room');
+  await expect(batch.locator(':scope>summary')).toContainText('Ada · Babbage · Curie · Dijkstra');
+  await expect(batch.locator('article')).toHaveCount(2);
+  await expect(batch.getByRole('button',{name:'Watch match →',exact:true}).first()).toBeHidden();
+  await batch.locator(':scope>summary').click();
+  await expect(batch.getByRole('button',{name:'Watch match →',exact:true}).first()).toBeVisible();
+  await expect.poll(()=>refreshes).toBeGreaterThan(1);
+  await expect(batch.locator(':scope>summary')).toContainText('2 finished');
+  await expect(batch).toHaveAttribute('open','');
+  await latest.locator(':scope>summary').click();
+  await expect(batch.getByRole('button',{name:'Watch match →',exact:true}).first()).toBeHidden();
+  await page.getByLabel('View',{exact:true}).selectOption('all');
+  await expect(page.locator('#matchArchive article')).toHaveCount(5);
+  await expect(page.locator('.archive-date')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel('View',{exact:true})).toHaveValue('all');
+  await page.getByLabel('View',{exact:true}).selectOption('grouped');
+  await expect(dates).toHaveCount(2);
+  await batch.locator(':scope>summary').click();
+  await page.screenshot({path:'test-results/match-archive-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/match-archive-mobile.png',fullPage:true});
+  await batch.getByRole('link').first().click();
+  await expect(page).toHaveURL(/#match\/game-fixture$/);
+  await expect(page.locator('#timeline')).toBeVisible();
+  expect(errors).toEqual([]);
 });
 
 test('long replay turn labels stay readable and clickable on desktop and mobile',async({page})=>{

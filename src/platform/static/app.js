@@ -2,6 +2,7 @@ import {Board, renderTopology, playerColors} from './board.js';
 import {Playback,turnMarkers} from './playback.js';
 import {developmentCardReport,mountResourceReport} from './report.js';
 import {roomControls,roomHistory,statisticsReport,matchNavigation} from './room-report.js';
+import {matchArchive} from './match-archive.js';
 
 const app=document.querySelector('#app'), modal=document.querySelector('#modal');
 const accountName=document.querySelector('#accountName'),accountButton=document.querySelector('#accountButton');
@@ -9,6 +10,8 @@ const apiBase=String(window.CATAN_CONFIG?.apiBaseUrl||'').replace(/\/$/,'');
 const apiUrl=url=>`${apiBase}${url}`;
 let authToken=localStorage.getItem('catan-session')||'',account=null;
 let routeVersion=0,pollTimer=null,playTimer=null,viewer=null,noticeTimer=null,roomSignature=null;
+const archiveOpenStates=new Map();
+let archiveView=sessionStorage.getItem('match-archive-view')==='all'?'all':'grouped',archiveSignature=null;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const path=s=>encodeURIComponent(s);
 const date=s=>new Date(s).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -34,12 +37,27 @@ const hexArt=`<svg viewBox="0 0 270 190" aria-hidden="true"><g stroke="#e0d8b2" 
 
 async function matches(version){
   const {games}=await api('/games');if(version!==routeVersion)return;
+  if(!document.querySelector('#matchArchive')){
   app.innerHTML=`<section class="hero"><div><h1>Run and watch<br>Catan bot matches</h1><p>Upload your bot, run matches with other players or built-in opponents, and review the results and replays.</p><div class="actions"><button class="accent" data-action="createRoom">Create a room ↗</button><a class="button-link" href="#match/demo"><button>Watch sample match</button></a></div></div><div class="hero-art">${hexArt}</div></section>
-  <div class="section-head"><h2>Recorded matches <span class="count">${games.length} recorded runs</span></h2><button class="quiet" data-action="refresh">↻ Refresh</button></div>
-  ${games.length?`<div class="cards">${games.map(g=>`<article class="card"><div class="card-top"><span class="eyebrow" style="margin:0">SEED ${esc(g.seed)}</span>${badge(g.status)}</div><h3>${esc(g.room_name||'Recorded match')}</h3><div class="muted">${date(g.created_at)}</div><div class="mini-players">${g.players.map((p,i)=>`<span class="mini-player"><i class="dot" style="background:${esc(g.participants?.[i]?.color||colors(i))}"></i>${esc(p)}</span>`).join(' · ')}</div><p class="muted">${g.status==='stopped'?'Recording ready · no winner recorded':g.status==='failed'?esc(g.reason):g.replay_available?'Recording available. Open the match to watch it or view results.':'Simulation in progress. The recording will be saved when it finishes.'}</p><div class="actions"><a class="button-link" href="#match/${path(g.game_id)}"><button class="${g.replay_available?'primary':''}">${g.replay_available?'Watch match →':'View progress →'}</button></a></div></article>`).join('')}</div>`:`<div class="empty"><div class="empty-symbol">⬡</div><h2>No recorded matches yet</h2><p class="muted">Watch a sample match or create a room to test your bot.</p><div class="actions" style="justify-content:center"><a href="#match/demo"><button>Watch sample match</button></a><button data-action="createRoom" class="primary">Create a room</button></div></div>`}
+  <div class="section-head archive-heading"><h2>Recorded matches <span class="count" id="archiveCount"></span></h2><div class="actions"><div class="archive-view"><label for="matchView">View</label><select id="matchView"><option value="grouped">By date and batch</option><option value="all">All matches</option></select></div><button class="quiet" data-action="refresh">↻ Refresh</button></div></div>
+  <div id="matchArchive"></div>
   <p class="muted" style="margin-top:24px">Matches run to completion before playback is available.</p>`;
-  bindActions();if(games.some(g=>['queued','running'].includes(g.status)))later(()=>matches(version),version);
+  archiveSignature=null;bindActions();
+  }
+  const renderArchive=()=>{
+    const signature=JSON.stringify([archiveView,games]);if(signature===archiveSignature)return;archiveSignature=signature;
+    document.querySelector('#archiveCount').textContent=`${games.length} recorded runs`;
+    const container=document.querySelector('#matchArchive');
+    container.innerHTML=games.length?matchArchive(games,{view:archiveView,openStates:archiveOpenStates,card:archiveMatchCard}):'<div class="empty"><div class="empty-symbol">⬡</div><h2>No recorded matches yet</h2><p class="muted">Watch a sample match or create a room to test your bot.</p><div class="actions" style="justify-content:center"><a href="#match/demo"><button>Watch sample match</button></a><button data-action="createRoom" class="primary">Create a room</button></div></div>';
+    container.querySelectorAll('[data-archive-key]').forEach(el=>el.addEventListener('toggle',()=>{if(el.isConnected)archiveOpenStates.set(el.dataset.archiveKey,el.open);}));
+    bindActions(container);
+  };
+  const view=document.querySelector('#matchView');view.value=archiveView;
+  view.onchange=()=>{archiveView=view.value;sessionStorage.setItem('match-archive-view',archiveView);renderArchive();};
+  renderArchive();if(games.some(g=>['queued','running'].includes(g.status)))later(()=>matches(version),version);
 }
+
+function archiveMatchCard(g){return `<article class="card archive-match"><div class="card-top"><span class="eyebrow" style="margin:0">SEED ${esc(g.seed)}</span>${badge(g.status)}</div><h3>${g.batch_index?`Match ${esc(g.batch_index)} · `:''}${esc(g.room_name||'Recorded match')}</h3><div class="muted">${date(g.created_at)}</div><div class="mini-players">${(g.players||[]).map((p,i)=>`<span class="mini-player"><i class="dot" style="background:${esc(g.participants?.[i]?.color||colors(i))}"></i>${esc(p)}</span>`).join(' · ')}</div><p class="muted">${g.status==='cancelled'?'This match was cancelled.':g.status==='stopped'?'Recording ready · no winner recorded':g.status==='failed'?esc(g.reason):g.replay_available?'Recording available. Open the match to watch it or view results.':'Simulation in progress. The recording will be saved when it finishes.'}</p><div class="actions"><a class="button-link" href="#match/${path(g.game_id)}"><button class="${g.replay_available?'primary':''}">${g.replay_available?'Watch match →':'View progress →'}</button></a></div></article>`;}
 
 async function rooms(version){const {rooms:roomList}=await api('/rooms');if(version!==routeVersion)return;
   app.innerHTML=`<div class="page-head"><div><h1>Rooms</h1><p class="muted">Join or create a four-player room to run one or more matches.</p></div><button class="primary" data-action="createRoom">+ Create room</button></div>
