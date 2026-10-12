@@ -1,5 +1,5 @@
 import {Board, renderTopology, playerColors} from './board.js';
-import {Playback} from './playback.js';
+import {Playback,turnMarkers} from './playback.js';
 import {developmentCardReport,mountResourceReport} from './report.js';
 import {roomControls,roomHistory,statisticsReport,matchNavigation} from './room-report.js';
 
@@ -58,7 +58,7 @@ async function room(id,version){const [{room:r},{bots}]=await Promise.all([api(`
   const savedCount=document.querySelector('#roomCount')?.value||sessionStorage.getItem(`count-${id}`)||'1';
   const savedRotate=document.querySelector('#roomRotate')?.checked??(sessionStorage.getItem(`rotate-${id}`)==='true');
   const savedKeepSeed=document.querySelector('#roomKeepSeed')?.checked??(sessionStorage.getItem(`keep-seed-${id}`)==='true');
-  app.innerHTML=`<a class="back" href="#rooms">← All rooms</a><div class="page-head"><div><h1>${esc(r.name)}</h1><p class="muted">Hosted by ${esc(r.created_by)} · ${ready} of 4 ready</p></div><div class="actions">${badge(r.status)}<button data-action="shareRoom">Copy room link</button></div></div>
+  app.innerHTML=`<a class="back" href="#rooms">← All rooms</a><div class="page-head"><div><h1>${esc(r.name)}</h1><p class="muted">Hosted by ${esc(r.created_by)} · ${ready} of 4 ready</p></div><div class="actions">${badge(r.status)}<button data-action="shareRoom">Copy room link</button>${r.private&&host?`<button data-action="deleteRoom" data-room="${esc(id)}">Delete room</button>`:''}</div></div>
   <div class="seat-grid">${r.seats.map((s,i)=>`<article class="card seat" style="--seat-color:${s.player_name?esc(s.color||colors(i)):'#cbd5c4'}"><div class="seat-no">SEAT 0${i+1} · ${s.ready?'READY':s.player_name?'SELECTING A BOT':'OPEN'}</div><div class="avatar">${esc((s.player_name||'?')[0].toUpperCase())}</div><h2>${esc(s.player_name||'Empty seat')}</h2><p class="muted">${s.bot_runner?esc(s.bot_runner):s.player_name?'No player selected yet':'Join this room or add a built-in bot.'}</p>
   ${waiting&&s.player_name===name()?`<label>Player version<select data-seat-bot="${esc(id)}"><option value="">Choose a player…</option>${valid.map(b=>`<option value="${esc(b.bot_id)}" ${b.bot_id===s.bot_runner?'selected':''}>${esc(b.name)} · ${esc(b.version)}</option>`).join('')}</select></label><div class="actions"><button class="${s.ready?'':'primary'}" data-action="ready" data-room="${esc(id)}" data-ready="${!s.ready}" ${!s.bot_runner?'disabled':''}>${s.ready?'Not ready':'Mark ready'}</button></div>`:''}
   ${waiting&&host&&(!s.player_name||s.bot_runner?.startsWith('builtin-'))?`<label>Simulation bot<select data-builtin-seat="${i}"><option value="">Empty seat</option>${['easy','medium','hard'].map(level=>`<option value="${level}" ${s.bot_runner===`builtin-${level}-v1`?'selected':''}>${level[0].toUpperCase()+level.slice(1)} bot</option>`).join('')}</select></label>`:''}
@@ -99,36 +99,41 @@ function describe(frame,previous,participants){
 }
 
 function errorLogButton(meta,id){return account&&(meta.status==='failed'||meta.error_players?.length)&&meta.participants?.some(p=>p.user_id===account.user_id)?`<button data-action="matchErrors" data-id="${esc(id)}">Player error log</button>`:'';}
+function renderMatchContent(html,meta){
+  if(!meta.room_id){app.innerHTML=html;return;}
+  const layout=app.querySelector('.batch-match-layout');
+  if(!layout||layout.dataset.room!==meta.room_id){
+    app.innerHTML=`<div class="batch-match-layout" data-room="${esc(meta.room_id)}"><aside id="batchNavigation"><nav aria-label="Batch matches" class="batch-sidebar"><h3>Matches</h3><span class="muted">Loading…</span></nav></aside><div class="batch-match-content"></div></div>`;
+  }
+  app.querySelector('.batch-match-content').innerHTML=html+'<div id="rematchControls" class="lobby-bar"></div>';
+}
 async function loadMatchNavigation(meta,version){
   if(!meta.room_id)return;
   try{
     const batch=await api(`/games/${path(meta.game_id)}/batch`);if(version!==routeVersion)return;
-    if(!document.querySelector('.batch-match-layout')){
-      const layout=document.createElement('div'),content=document.createElement('div'),sidebar=document.createElement('aside');
-      layout.className='batch-match-layout';content.className='batch-match-content';sidebar.id='batchNavigation';
-      while(app.firstChild)content.append(app.firstChild);
-      layout.append(sidebar,content);app.append(layout);
-      const controls=document.createElement('div');controls.id='rematchControls';controls.className='lobby-bar';content.append(controls);
-    }
     document.querySelector('#batchNavigation').innerHTML=matchNavigation(meta,batch);
+    if(!batch.room_id){
+      document.querySelector('#rematchControls').innerHTML='<div><a class="notice-link" href="#matches">← All matches</a><p class="muted">This room was deleted. Its saved matches remain available.</p></div>';
+      return;
+    }
     document.querySelector('#rematchControls').innerHTML=`<div><a class="notice-link" href="#room/${path(meta.room_id)}">← Back to room and statistics</a><p class="muted">${batch.can_rematch?'Run another match with the same players and bot versions.':'The room creator can rematch when this lineup is ready and no batch is running.'}</p></div><div class="actions"><button data-action="rematch" data-room="${esc(meta.room_id)}" data-id="${esc(meta.game_id)}" data-seed="new" data-original-seed="${meta.seed}" ${batch.can_rematch?'':'disabled'}>Rematch with new seed</button><button data-action="rematch" data-room="${esc(meta.room_id)}" data-id="${esc(meta.game_id)}" data-seed="${meta.seed}" ${batch.can_rematch?'':'disabled'}>Replay same seed</button></div>`;
     bindActions(document.querySelector('#rematchControls'));
     if(meta.replay_available&&(batch.room_busy||batch.matches.some(g=>['queued','running'].includes(g.status))))later(()=>loadMatchNavigation(meta,version),version);
   }catch(error){if(meta.batch_id&&version===routeVersion)notify(error.message);}
 }
 async function match(id,version){const demo=id==='demo';let replay=demo?await api('/demo/replay'):null;const meta=demo?replay.metadata:await api(`/games/${path(id)}`);if(version!==routeVersion)return;
-  if(!meta.replay_available){app.innerHTML=`<a class="back" href="#matches">← All matches</a><div class="empty">${['running','queued'].includes(meta.status)?'<div class="spinner"></div>':''}<div class="eyebrow">Seed ${esc(meta.seed)}</div><h1>${meta.status==='cancelled'?'Match cancelled':meta.status==='failed'?'Simulation failed':'Simulating match'}</h1><p class="muted">${['failed','cancelled'].includes(meta.status)?esc(meta.reason):'The simulation runs in the background. Return to this match when the recording is ready.'}</p>${badge(meta.status)}${errorLogButton(meta,id)}<p class="muted">${meta.players.map(esc).join(' · ')}</p><a href="#matches"><button>Back to matches</button></a></div>`;loadMatchNavigation(meta,version);if(['running','queued'].includes(meta.status))later(()=>match(id,version),version);return;}
+  if(!meta.replay_available){renderMatchContent(`<a class="back" href="#matches">← All matches</a><div class="empty">${['running','queued'].includes(meta.status)?'<div class="spinner"></div>':''}<div class="eyebrow">Seed ${esc(meta.seed)}</div><h1>${meta.status==='cancelled'?'Match cancelled':meta.status==='failed'?'Simulation failed':'Simulating match'}</h1><p class="muted">${['failed','cancelled'].includes(meta.status)?esc(meta.reason):'The simulation runs in the background. Return to this match when the recording is ready.'}</p>${badge(meta.status)}${errorLogButton(meta,id)}<p class="muted">${meta.players.map(esc).join(' · ')}</p><a href="#matches"><button>Back to matches</button></a></div>`,meta);loadMatchNavigation(meta,version);if(['running','queued'].includes(meta.status))later(()=>match(id,version),version);return;}
   if(!demo)replay=await api(`/game/${path(id)}/replay`);if(version!==routeVersion)return;
   if(replay.schema_version!==1||!replay.frames?.length)throw Error('This recording does not contain a supported board replay.');
   const participants=meta.participants||[], frames=replay.frames;
-  app.innerHTML=`<a class="back" href="#matches">← All matches</a><div class="page-head viewer-head"><div><div class="eyebrow">Recorded match</div><h1>${esc(meta.room_name||'Recorded match')} <span class="highlight">/ ${esc(meta.seed)}</span></h1><p class="muted">${date(meta.created_at)} · ${frames.length-1} recorded steps</p></div><div class="actions">${errorLogButton(meta,id)}<button data-action="showResults">Show results ↗</button><button data-action="download" data-id="${esc(id)}">Download replay ↓</button></div></div>
+  renderMatchContent(`<a class="back" href="#matches">← All matches</a><div class="page-head viewer-head"><div><div class="eyebrow">Recorded match</div><h1>${esc(meta.room_name||'Recorded match')} <span class="highlight">/ ${esc(meta.seed)}</span></h1><p class="muted">${date(meta.created_at)} · ${frames.length-1} recorded steps</p></div><div class="actions">${errorLogButton(meta,id)}<button data-action="showResults">Show results ↗</button><button data-action="download" data-id="${esc(id)}">Download replay ↓</button></div></div>
   ${!replay.geometry.valid_hex_topology?'<div class="note">Simulator geometry is provisional. The hexes show the recorded terrain; roads, buildings and ports are shown in the labelled topology below, because the simulator does not yet connect them to valid hex corners.</div>':''}
   <div class="viewer-layout"><div><section class="board-panel" id="tableView"><div class="board-toolbar"><div class="actions"><span class="pill" id="turnBadge"></span><span class="muted" id="phaseLabel"></span><span class="pill" id="diceBadge"></span></div><div class="actions"><button id="zoomOut" aria-label="Zoom out">−</button><button id="resetBoard">Reset view</button><button id="zoomIn" aria-label="Zoom in">+</button><button id="fullscreenBoard" aria-label="Enter fullscreen">⛶ Full screen</button></div></div><div class="board-arena"><div class="board-stage" id="board"></div><div class="table-players">${participants.map((p,i)=>`<div class="table-seat seat-${i}" style="--player-color:${esc(p.color||colors(i))}"><span>${esc((p.name||p.player_id)[0])}</span><strong>${esc(p.name||p.player_id)}</strong></div>`).join('')}</div><div class="trade-overlay" id="tradeOverlay" aria-live="polite"></div></div><div class="board-caption">Drag to pan · scroll to zoom <span style="float:right">RECORDED BOARD</span></div></section>
   <div class="players-strip" id="players"></div>
   <section class="playback" aria-label="Replay controls"><div class="playback-top"><strong id="currentEvent"></strong><span id="position"></span></div><input id="timeline" type="range" min="0" max="${frames.length-1}" value="0" aria-label="Replay timeline"><div class="timeline-markers" id="markers"></div><div class="transport"><button id="beginning" aria-label="Beginning">|◀</button><button id="prevTurn" aria-label="Previous turn">« Turn</button><button id="prevEvent" aria-label="Previous event">‹</button><button id="play" class="primary play">▶ Play</button><button id="nextEvent" aria-label="Next event">›</button><button id="nextTurn" aria-label="Next turn">Turn »</button><button id="end" aria-label="End">▶|</button><select id="speed" aria-label="Playback speed"><option value="1500">0.5×</option><option value="750" selected>1×</option><option value="375">2×</option><option value="150">5×</option></select></div><p class="key-hint">Space to play/pause · ← → to step · Shift + ← → to move by turn</p></section>
   <details class="topology card" ${!replay.geometry.valid_hex_topology?'open':''} id="topology"><summary>Recorded roads, buildings & ports</summary><div id="topologyDrawing"></div><div class="port-list">${replay.geometry.ports.map(p=>`<span>${esc(p.type==='THREE_TO_ONE'?'3:1':`2:1 ${p.type.replace('TWO_TO_ONE_','').toLowerCase()}`)} · ${p.vertices.map(esc).join(' / ')}</span>`).join('')}</div></details></div>
   <aside class="feed-panel"><div class="feed-title"><h2>Match journal</h2><p>Select an event to view the board at that point.</p></div><div class="feed" id="feed">${frames.map((f,i)=>`<button class="event-row" data-frame="${i}"><span class="event-num">${String(i).padStart(2,'0')}</span><span><strong>${esc(describe(f,frames[i-1],participants))}</strong><small>Turn ${f.state.turn_number} · ${esc(f.state.phase.replaceAll('_',' ').toLowerCase())}</small></span></button>`).join('')}</div></aside></div>
-  <section id="results" class="results" hidden></section>`;
+  <section id="results" class="results" hidden></section>`,meta);
   viewer={id,replay,playback:new Playback(frames),board:new Board(document.querySelector('#board'),replay.geometry,participants),participants,lastTradeFrame:-1};
   bindActions();document.querySelector('#zoomOut').onclick=()=>viewer.board.setZoom(viewer.board.zoom/1.2);document.querySelector('#zoomIn').onclick=()=>viewer.board.setZoom(viewer.board.zoom*1.2);document.querySelector('#resetBoard').onclick=()=>viewer.board.reset();
   document.querySelector('#fullscreenBoard').onclick=async()=>{const table=document.querySelector('#tableView');if(document.fullscreenElement)await document.exitFullscreen();else await table.requestFullscreen();};
@@ -139,8 +144,15 @@ async function match(id,version){const demo=id==='demo';let replay=demo?await ap
   document.querySelector('#beginning').onclick=()=>jump(()=>viewer.playback.seek(0));document.querySelector('#end').onclick=()=>jump(()=>viewer.playback.seek(frames.length-1));
   document.querySelector('#play').onclick=togglePlay;document.querySelector('#speed').onchange=()=>{if(playTimer){stopPlayback();togglePlay();}};
   document.querySelectorAll('[data-frame]').forEach(el=>el.onclick=()=>jump(()=>viewer.playback.seek(el.dataset.frame)));
-  const markers=document.querySelector('#markers');let last=null;
-  frames.forEach((f,i)=>{if(f.state.turn_number===last)return;last=f.state.turn_number;const b=document.createElement('button');b.style.left=`${i/(frames.length-1||1)*100}%`;b.textContent=last;b.title=`Jump to turn ${last}`;b.setAttribute('aria-label',b.title);b.onclick=()=>jump(()=>viewer.playback.seek(i));markers.append(b);});
+  const markers=document.querySelector('#markers');
+  const drawMarkers=()=>{
+    markers.replaceChildren(...turnMarkers(frames,markers.clientWidth).map(({turn,index,position})=>{
+      const b=document.createElement('button');b.style.left=`${position*100}%`;b.textContent=turn;
+      b.title=`Jump to turn ${turn}`;b.setAttribute('aria-label',b.title);
+      b.onclick=()=>jump(()=>viewer.playback.seek(index));return b;
+    }));
+  };
+  drawMarkers();viewer.markerObserver=new ResizeObserver(drawMarkers);viewer.markerObserver.observe(markers);
   if(replay.geometry.valid_hex_topology)document.querySelector('#topology').hidden=true;
   paint();
   loadMatchNavigation(meta,version);
@@ -170,6 +182,16 @@ function showResults(scroll=true){if(!viewer)return;const {result}=viewer.replay
 }
 
 const actions={
+  deleteRoom:async el=>{
+    const {room}=await api(`/rooms/${path(el.dataset.room)}`);
+    dialog('Delete private room',`<form id="deleteRoomForm" class="form-stack"><p>Delete <strong>${esc(room.name)}</strong>?</p><p class="muted">The room will be removed. Saved matches stay in your match archive, and your bots are kept.</p><button class="primary" type="submit">Delete room</button><button type="button" id="cancelDeleteRoom">Cancel</button></form>`);
+    document.querySelector('#cancelDeleteRoom').onclick=()=>modal.close();
+    formHandler(document.querySelector('#deleteRoomForm'),async()=>{
+      await api(`/rooms/${path(room.room_id)}`,undefined,'DELETE');
+      for(const key of ['seed','count','rotate','keep-seed'])sessionStorage.removeItem(`${key}-${room.room_id}`);
+      modal.close();location.hash='rooms';notify('Private room deleted. Saved matches are still available.');
+    });
+  },
   matchErrors:async el=>{const report=await api(`/games/${path(el.dataset.id)}/errors`);dialog('Your player error log',report.errors.length?`<p class="muted">Only you can view your player error log.</p>${report.errors.map(e=>`<section class="card"><h3>${esc(e.player_id)} · ${esc(e.callback)}</h3><p class="muted">${e.phase?`Phase ${esc(e.phase)} · turn ${esc(e.turn_number)} · decision ${esc(e.decision_id)}`:''}</p><p class="form-error">${esc(e.error)}</p>${e.returned_action!==undefined?`<h4>Returned action</h4><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(JSON.stringify(e.returned_action,null,2))}</pre>`:''}${e.available_types?`<p>Available actions: ${esc(e.available_types.join(', '))}</p>`:''}${e.hint?`<p>${esc(e.hint)}</p>`:''}${e.traceback?`<details open><summary>Stack trace</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(e.traceback)}</pre></details>`:''}</section>`).join('')}`:`<p>${esc(report.message)}</p>`);},
   editBot:async el=>{const b=await api(`/bots/${path(el.dataset.id)}`);b.bot_code=(b.bot_code||'').replace(/\r\n?/g,'\n');dialog('Edit player',`<form id="editBotForm" class="form-stack"><label>Player name<input name="bot_name" required maxlength="80" value="${esc(b.name)}"></label><label>Description<input name="description" maxlength="2000" value="${esc(b.description)}"></label><p class="muted">Current version: ${esc(b.version)}. Name and description changes update this entry. Code changes must be saved as a new version to preserve existing matches.</p><label>New version<input name="bot_version" maxlength="40" placeholder="Required for code changes, e.g. v2"></label><label>Choose a replacement .py file<input id="editBotFile" type="file" accept=".py,text/x-python"></label><label>Player code<textarea id="editBotCode" ${b.bot_code?'required':''}></textarea></label><button class="primary" type="submit">Save changes</button></form>`);
     document.querySelector('#editBotCode').value=b.bot_code||'';
@@ -198,7 +220,13 @@ const actions={
     formHandler(document.querySelector('#botForm'),async (f,submitter)=>{const data=Object.fromEntries(f);data.entrypoint='main.py';data.use_sandbox=true;data.bot_code=document.querySelector('#botCode').value;const result=await api('/bots/upload',data);if(!result.validated)throw Error(result.validation_errors.join(' '));modal.close();notify('Player version saved.');await renderRoute();if(submitter?.id==='saveAndTest')actions.testPlayer({dataset:{id:result.bot_id}});});}
 };
 
-async function renderRoute(){const version=++routeVersion;clearTimeout(pollTimer);stopPlayback();viewer=null;roomSignature=null;const [page,id]=location.hash.slice(1).split('/');document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.hash==='#'+(['match','matches',''].includes(page||'')?'matches':page==='room'?'rooms':page)));app.innerHTML='<div class="empty"><div class="spinner"></div><p class="muted">Loading…</p></div>';
+async function renderRoute(){const version=++routeVersion;clearTimeout(pollTimer);stopPlayback();viewer?.markerObserver?.disconnect();viewer=null;roomSignature=null;const [page,id]=location.hash.slice(1).split('/');document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.hash==='#'+(['match','matches',''].includes(page||'')?'matches':page==='room'?'rooms':page)));
+  const loading='<div class="empty"><div class="spinner"></div><p class="muted">Loading…</p></div>';
+  const sibling=page==='match'&&[...app.querySelectorAll('#batchNavigation a')].some(a=>a.hash===location.hash);
+  if(sibling){
+    app.querySelector('.batch-match-content').innerHTML=loading;
+    app.querySelectorAll('#batchNavigation a').forEach(a=>a.hash===location.hash?a.setAttribute('aria-current','page'):a.removeAttribute('aria-current'));
+  }else app.innerHTML=loading;
   try{if(page==='rooms')await rooms(version);else if(page==='bots')await bots(version);else if(page==='account')await accountPage(version);else if(page==='room'&&id)await room(decodeURIComponent(id),version);else if(page==='match'&&id)await match(decodeURIComponent(id),version);else await matches(version);}catch(error){if(version!==routeVersion)return;app.innerHTML=`<div class="card error-panel"><h2>Could not load this page</h2><p class="muted">${esc(error.message)}</p><div class="actions">${!account?'<button class="primary" data-action="signIn">Sign in</button>':''}<button data-action="refresh">Try again</button><a href="#matches">Back to matches →</a></div></div>`;bindActions();}}
 window.addEventListener('hashchange',renderRoute);
 window.addEventListener('keydown',e=>{if(!viewer||modal.open||['INPUT','TEXTAREA','SELECT','BUTTON'].includes(document.activeElement.tagName))return;if(e.code==='Space'){e.preventDefault();togglePlay();}if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();stopPlayback();const direction=e.key==='ArrowLeft'?-1:1;e.shiftKey?viewer.playback.turn(direction):viewer.playback.step(direction);paint();}});

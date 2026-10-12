@@ -27,8 +27,25 @@ test('reusable private room runs a batch, navigates matches, shows statistics an
   await expect(page.getByRole('navigation',{name:'Batch matches'}).locator('a')).toHaveCount(3,{timeout:30000});
   await expect(page.locator('#timeline')).toBeVisible({timeout:90000});
   const navigation=page.getByRole('navigation',{name:'Batch matches'});
-  await navigation.getByRole('link',{name:/Match 2/}).click();
-  await expect(page.locator('#timeline')).toHaveValue('0',{timeout:90000});
+  const secondMatch=navigation.getByRole('link',{name:/Match 2/});
+  const secondId=(await secondMatch.getAttribute('href')).split('/')[1];
+  const sidebar=await page.locator('#batchNavigation').elementHandle();
+  let releaseNavigation;
+  const navigationGate=new Promise(resolve=>releaseNavigation=resolve);
+  let navigationHandled;
+  const navigationFinished=new Promise(resolve=>navigationHandled=resolve);
+  const batchRoute=`**/games/${secondId}/batch`;
+  await page.route(batchRoute,async route=>{await navigationGate;await route.continue();navigationHandled();});
+  try{
+    await secondMatch.click();
+    await expect(page.locator('.viewer-head .highlight')).toHaveText('/ 21',{timeout:90000});
+    await expect(page.locator('#timeline')).toHaveValue('0',{timeout:90000});
+    // Slow navigation metadata must not remove the sidebar or shift the board.
+    expect(await sidebar.evaluate(element=>element.isConnected)).toBe(true);
+    await expect(page.getByRole('navigation',{name:'Batch matches'}).locator('a')).toHaveCount(3);
+  }finally{releaseNavigation();}
+  await navigationFinished;
+  await page.unrouteAll({behavior:'wait'});
   await expect(page.locator('[aria-current=page]')).toContainText('Match 2');
   await expect(page.getByRole('button',{name:'Replay same seed',exact:true})).toBeEnabled({timeout:90000});
   await page.screenshot({path:'test-results/room-batch-replay.png',fullPage:true});
@@ -58,7 +75,7 @@ test('reusable private room runs a batch, navigates matches, shows statistics an
   expect(errors).toEqual([]);
 });
 
-test('batch seed can stay constant and the setting survives a room reload',async({page})=>{
+test('constant-seed batch settings persist and its private room can be deleted without losing replays',async({page})=>{
   test.setTimeout(120000);
   const suffix=Date.now().toString(36);
   await page.goto('/');
@@ -82,11 +99,63 @@ test('batch seed can stay constant and the setting survives a room reload',async
   for(let index=0;index<3;index++)await expect(links.nth(index)).toContainText('Seed 31');
   await expect(page.locator('#timeline')).toBeVisible({timeout:90000});
   await expect(page.getByRole('button',{name:'Replay same seed',exact:true})).toBeEnabled({timeout:90000});
+  const matchUrl=page.url();
   await page.goto(roomUrl);
   await expect(page.locator('.batch-history summary')).toContainText('same seed');
   await page.screenshot({path:'test-results/constant-seed-room.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.setViewportSize({width:1440,height:1050});
+  await page.getByRole('button',{name:'Delete room',exact:true}).click();
+  await expect(page.getByRole('dialog')).toContainText('Saved matches stay in your match archive');
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  await expect(page).toHaveURL(roomUrl);
+  await page.getByRole('button',{name:'Delete room',exact:true}).click();
+  await page.getByRole('dialog').getByRole('button',{name:'Delete room',exact:true}).click();
+  await expect(page).toHaveURL(/#rooms$/);
+  await expect(page.locator(`a[href="#${new URL(roomUrl).hash.slice(1)}"]`)).toHaveCount(0);
+  await page.goto(matchUrl);
+  await expect(page.locator('#timeline')).toBeVisible();
+  await expect(page.locator('#rematchControls')).toContainText('This room was deleted');
+  await expect(page.getByRole('button',{name:'Replay same seed',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('navigation',{name:'Batch matches'}).locator('a')).toHaveCount(3);
+});
+
+test('long replay turn labels stay readable and clickable on desktop and mobile',async({page})=>{
+  const {metadata,replay}=completeBoardFixture(),errors=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  metadata.room_id=null;
+  const state=replay.frames[1].state;
+  replay.frames=Array.from({length:475},(_,index)=>({sequence:index,label:`Recorded action ${index}`,state:{...structuredClone(state),turn_number:Math.floor(index/2)+1},events:[]}));
+  await page.route('**/games/game-fixture',route=>route.fulfill({json:metadata}));
+  await page.route('**/game/game-fixture/replay',route=>route.fulfill({json:replay}));
+  await page.goto('/#match/game-fixture');
+  const markers=page.locator('#markers button');
+  const labelBounds=()=>markers.evaluateAll(buttons=>buttons.map(button=>{const box=button.getBoundingClientRect();return {left:box.left,right:box.right};}));
+  const checkSpacing=async()=>{
+    const bounds=await labelBounds();
+    expect(bounds.length).toBeGreaterThan(2);
+    for(let index=1;index<bounds.length;index++)expect(bounds[index].left-bounds[index-1].right).toBeGreaterThanOrEqual(8);
+  };
+  await expect(markers.first()).toHaveText('1');
+  await expect(markers.last()).toHaveText('238');
+  await checkSpacing();
+  const desktopCount=await markers.count();
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>markers.count()).toBeLessThan(desktopCount);
+  await checkSpacing();
+  await expect(markers.last()).toHaveText('238');
+  const turn=Number(await markers.nth(1).textContent());
+  await markers.nth(1).click();
+  await expect(page.locator('#timeline')).toHaveValue(String((turn-1)*2));
+  await page.getByRole('button',{name:'Next turn',exact:true}).click();
+  await expect(page.locator('#turnBadge')).toHaveText(`TURN ${turn+1}`);
+  await page.locator('.playback').screenshot({path:'test-results/long-replay-timeline-mobile.png'});
+  await page.setViewportSize({width:1440,height:1050});
+  await expect.poll(()=>markers.count()).toBe(desktopCount);
+  await checkSpacing();
+  await page.locator('.playback').screenshot({path:'test-results/long-replay-timeline-desktop.png'});
+  expect(errors).toEqual([]);
 });
 
 test('match report expands played cards and inspects five resources for each player',async({page})=>{
@@ -296,6 +365,7 @@ test('four participants select saved bots, ready up and launch a recorded batch'
       if(participant===page)await page.getByLabel('Matches',{exact:true}).fill('2');
     }
     // Readiness continues updating while the host is editing the batch count.
+    await expect(page.getByRole('button',{name:'Delete room',exact:true})).toHaveCount(0);
     await expect(page.getByRole('button',{name:'Run 2 matches →',exact:true})).toBeEnabled();
     await page.screenshot({path:'test-results/room-ready.png',fullPage:true});
     await page.getByRole('button',{name:'Run 2 matches →',exact:true}).click();

@@ -9,6 +9,7 @@ from src.platform import server
 from src.platform.replay_store import ReplayStore
 from src.platform.room_batches import FairMatchQueue, aggregate
 from src.platform.match_worker import run_job
+from src.platform.database import RoomAccess
 from tests.test_builtin_rooms import account
 
 CODE='from src.player import Player\nclass P(Player):\n def choose_action(self,view,options): return options[0]\n'
@@ -86,6 +87,48 @@ def test_batch_can_keep_seed_constant_independently_of_seat_rotation(setup,rotat
     assert [g['participants'][0]['room_seat'] for g in games]==([1,2,3] if rotate_seats else [1,1,1])
     room=client.get(f'/rooms/{rid}',headers=owner).json()['room']
     assert room['batches'][0]['keep_seed'] is True
+
+
+def test_private_room_deletion_keeps_recordings_private_and_bots_saved(setup):
+    client,_=setup;rid,owner=ready_room(client,True);stranger=account(client)
+    batch=start(client,rid,owner,count=2)
+    for gid in batch['game_ids']: finish(gid)
+    game=server.store.metadata(batch['game_id'])
+    recording={'metadata':game,'result':{'status':'completed'},'frames':[]}
+    server.store.finish(game['game_id'],recording,{**game,'replay_available':True})
+    bots=client.get('/bots',headers=owner).json()
+    stats=client.get('/account/stats',headers=owner).json()
+    assert client.delete(f'/rooms/{rid}',headers=owner).status_code==200
+    assert client.get(f'/rooms/{rid}',headers=owner).status_code==404
+    assert rid not in [r['room_id'] for r in client.get('/rooms',headers=owner).json()['rooms']]
+    with server.room_service.db_manager as session:
+        assert session.get(RoomAccess,rid) is None
+    assert client.get('/bots',headers=owner).json()==bots
+    assert client.get('/account/stats',headers=owner).json()==stats
+    assert client.get(f"/game/{game['game_id']}/replay",headers=owner).json()==recording
+    navigation=client.get(f"/games/{game['game_id']}/batch",headers=owner).json()
+    assert navigation['room_id'] is None and not navigation['can_rematch']
+    assert len(navigation['matches'])==2
+    for headers in ({},stranger):
+        assert client.get(f"/games/{game['game_id']}",headers=headers).status_code==404
+        assert client.get(f"/game/{game['game_id']}/replay",headers=headers).status_code==404
+        assert client.get(f"/games/{game['game_id']}/batch",headers=headers).status_code==404
+    assert client.delete(f'/rooms/{rid}',headers=owner).status_code==404
+
+
+def test_private_room_deletion_checks_ownership_and_active_batches(setup):
+    client,_=setup;rid,owner=ready_room(client,True);stranger=account(client)
+    for headers in ({},stranger):
+        assert client.delete(f'/rooms/{rid}',headers=headers).status_code==404
+    public,host=ready_room(client)
+    assert client.delete(f'/rooms/{public}',headers=host).status_code==403
+    batch=start(client,rid,owner,count=2)
+    assert client.delete(f'/rooms/{rid}',headers=owner).status_code==409
+    first=server.store.metadata(batch['game_id']);first['status']='running';server.store.save_metadata(first)
+    client.post(f"/rooms/{rid}/batches/{batch['batch_id']}/cancel",headers=owner)
+    assert client.delete(f'/rooms/{rid}',headers=owner).status_code==409
+    finish(first['game_id'])
+    assert client.delete(f'/rooms/{rid}',headers=owner).status_code==200
 
 
 def test_cancel_preserves_running_match_and_room_can_be_reused(setup,monkeypatch):

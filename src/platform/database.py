@@ -495,10 +495,11 @@ class RoomRepository:
             return None
     
     def delete_room(self, room_id: str) -> bool:
-        """Delete a room by ID."""
+        """Delete a lobby and its access row, retaining saved games."""
         with self.db as session:
             room = session.query(Room).filter(Room.id == room_id).first()
             if room:
+                session.query(RoomAccess).filter(RoomAccess.room_id == room_id).delete()
                 session.delete(room)
                 session.commit()
                 return True

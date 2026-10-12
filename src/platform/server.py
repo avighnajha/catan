@@ -433,6 +433,20 @@ def get_room(room_id: str, request: Request):
     return {"room": room}
 
 
+@app.delete('/rooms/{room_id}')
+def delete_private_room(room_id: str, request: Request):
+    access=check_room(room_id,request)
+    user=current_user(request)
+    with mutation_lock:
+        room_service.get_room(room_id)
+        if not user or not access['private'] or access['owner_id'] != user['user_id']:
+            raise HTTPException(403,'Only the owner can delete a private room')
+        if any(g['status'] in ACTIVE for g in room_matches(room_id)):
+            raise HTTPException(409,'Wait for running matches to finish and cancel any queued matches before deleting this room.')
+        room_service.room_repository.delete_room(room_id)
+    return {'deleted':True,'room_id':room_id}
+
+
 @app.get('/rooms/{room_id}/statistics')
 def room_statistics(room_id: str, request: Request, batch_id: str | None = None):
     check_room(room_id,request)
@@ -449,13 +463,16 @@ def match_batch(game_id: str, request: Request):
     game=check_game(game_id,request)
     games=[g for g in room_matches(game['room_id']) if g.get('batch_id') == game.get('batch_id')] if game.get('batch_id') else [game]
     games.sort(key=lambda g:g.get('batch_index',1))
-    room=room_service.get_room(game['room_id']) if game.get('room_id') else None
+    try:
+        room=room_service.get_room(game['room_id']) if game.get('room_id') else None
+    except KeyError:
+        room=None
     user=current_user(request,required=False)
     access=room_access(game['room_id']) if room else {}
     host=bool(room and user and (user['user_id']==access.get('owner_id') or
         (not access.get('owner_id') and any(s.user_id==user['user_id'] and s.player_name==room.created_by for s in room.seats))))
     return {'matches':games,'can_rematch':bool(host and room.is_ready() and same_lineup(room,game)),
-            'room_id':game.get('room_id'),'room_busy':bool(room and room.status=='playing')}
+            'room_id':room.room_id if room else None,'room_busy':bool(room and room.status=='playing')}
 
 
 @app.post('/rooms/{room_id}/batches/{batch_id}/cancel')
