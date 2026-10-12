@@ -54,7 +54,7 @@ for _old_room in room_service.list_rooms():
 workers = FairMatchQueue(max_workers=2)
 MAX_BATCH_SIZE = min(100, max(1, int(os.getenv('CATAN_MAX_BATCH_SIZE', '10'))))
 mutation_lock = threading.RLock()
-app = FastAPI(title="Catan replay studio")
+app = FastAPI(title="Catan Simulator")
 frontend_origins = [origin.strip().rstrip("/") for origin in
                     os.getenv("CATAN_FRONTEND_ORIGINS", "").split(",") if origin.strip()]
 if frontend_origins:
@@ -102,6 +102,7 @@ class StartGameRequest(BaseModel):
     seed: conint(strict=True, ge=0, le=2**31 - 1) = 42
     count: conint(strict=True, ge=1, le=MAX_BATCH_SIZE) = 1
     rotate_seats: bool = False
+    keep_seed: bool = False
     rematch_of: str | None = None
 
 
@@ -307,8 +308,8 @@ def same_lineup(room, game):
     return actual == expected
 
 
-def launch(seed, participants, packages, room_id, room_name, count=1, rotate_seats=False, rematch_of=None):
-    if seed + count - 1 > 2**31 - 1:
+def launch(seed, participants, packages, room_id, room_name, count=1, rotate_seats=False, rematch_of=None, keep_seed=False):
+    if not keep_seed and seed + count - 1 > 2**31 - 1:
         raise ValueError('The starting seed plus match count exceeds the maximum seed')
     previous=room_matches(room_id)
     batch_id=f'batch-{uuid.uuid4().hex}'
@@ -320,11 +321,11 @@ def launch(seed, participants, packages, room_id, room_name, count=1, rotate_sea
         lineup=deepcopy(participants[offset:]+participants[:offset])
         ordered_packages=packages[offset:]+packages[:offset]
         for pid,participant in zip(PlayerId.all_players(),lineup): participant['player_id']=pid.value
-        metadata={'game_id':f'game-{uuid.uuid4().hex}','seed':seed+index,'room_id':room_id,'room_name':room_name,
+        metadata={'game_id':f'game-{uuid.uuid4().hex}','seed':seed if keep_seed else seed+index,'room_id':room_id,'room_name':room_name,
             'players':[p['name'] for p in lineup],'participants':lineup,'status':'queued','created_at':now(),
             'winner':None,'replay_available':False,'batch_id':batch_id,'batch_number':batch_number,
             'batch_index':index+1,'batch_count':count,'room_match_number':first_number+index,
-            'rotate_seats':rotate_seats,'rematch_of':rematch_of}
+            'rotate_seats':rotate_seats,'keep_seed':keep_seed,'rematch_of':rematch_of}
         metadata.update(room_access(room_id))
         metadata['implementation_hashes']=[p.metadata.get('sha256') or hashlib.sha256(p.bot_code.encode()).hexdigest() for p in ordered_packages]
         matches.append(metadata);jobs.append((dict(metadata),ordered_packages))
@@ -566,7 +567,7 @@ def start_room_game(room_id: str, payload: StartGameRequest, request: Request):
             participants=deepcopy(old['participants'])
             packages=[require_bot(p['bot_id']) for p in participants]
         return launch(payload.seed, participants, packages, room_id, room.name,
-                      payload.count,payload.rotate_seats,payload.rematch_of)
+                      payload.count,payload.rotate_seats,payload.rematch_of,payload.keep_seed)
 
 
 @app.get("/bots")

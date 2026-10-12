@@ -80,7 +80,8 @@ def group_batches(games):
         result.append({'batch_id': key, 'number': matches[0].get('batch_number'),
                        'matches': matches, 'total': len(matches), 'finished': len(matches)-active,
                        'active': bool(active), 'statuses': dict(statuses),
-                       'rotate_seats': matches[0].get('rotate_seats', False)})
+                       'rotate_seats': matches[0].get('rotate_seats', False),
+                       'keep_seed': matches[0].get('keep_seed', False)})
     return result
 
 

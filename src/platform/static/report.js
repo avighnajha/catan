@@ -31,14 +31,14 @@ export function resourceHistory(replay,playerId){
 }
 
 export function developmentCardReport(replay,participants){
-  return `<div class="card report-card"><h3>Development cards played</h3><p class="muted">Expand a player for the card breakdown. Victory point cards are not played and are excluded.</p><div class="dev-card-list">${participants.map(p=>{
+  return `<div class="card report-card"><h3>Development cards played</h3><p class="muted">Select a player to see counts by card type. Victory point cards are excluded.</p><div class="dev-card-list">${participants.map(p=>{
     const {counts,total}=developmentCards(replay,p.player_id);
     return `<details><summary>${escape(p.name||p.player_id)} <strong>${total} played</strong></summary><dl>${cards.map(([key,label])=>`<div><dt>${label}</dt><dd>${counts[key]}</dd></div>`).join('')}</dl></details>`;
   }).join('')}</div></div>`;
 }
 
 export function mountResourceReport(container,replay,participants){
-  container.innerHTML=`<h3>Resources held over time</h3><p class="muted">All five resources at every recorded transition, including trades, builds and discards. These hands are available only in the finished spectator recording.</p><div class="resource-tabs" role="tablist" aria-label="Player resource histories">${participants.map((p,i)=>`<button role="tab" id="resource-tab-${i}" aria-controls="resource-chart-panel" aria-selected="${i===0}" tabindex="${i===0?0:-1}">${escape(p.name||p.player_id)}</button>`).join('')}</div><div id="resource-chart-panel" role="tabpanel" aria-labelledby="resource-tab-0"></div>`;
+  container.innerHTML=`<h3>Resources held over time</h3><p class="muted">Select a player to see their resources during the match. Opponent resource counts are only shown in finished replays.</p><div class="resource-tabs" role="tablist" aria-label="Player resource histories">${participants.map((p,i)=>`<button role="tab" id="resource-tab-${i}" aria-controls="resource-chart-panel" aria-selected="${i===0}" tabindex="${i===0?0:-1}">${escape(p.name||p.player_id)}</button>`).join('')}</div><div id="resource-chart-panel" role="tabpanel" aria-labelledby="resource-tab-0"></div>`;
   const tabs=[...container.querySelectorAll('[role=tab]')],panel=container.querySelector('[role=tabpanel]');
   function select(index){
     tabs.forEach((tab,i)=>{tab.setAttribute('aria-selected',String(i===index));tab.tabIndex=i===index?0:-1;});

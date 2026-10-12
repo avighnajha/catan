@@ -58,6 +58,37 @@ test('reusable private room runs a batch, navigates matches, shows statistics an
   expect(errors).toEqual([]);
 });
 
+test('batch seed can stay constant and the setting survives a room reload',async({page})=>{
+  test.setTimeout(120000);
+  const suffix=Date.now().toString(36);
+  await page.goto('/');
+  await register(page,`Fixed-${suffix}`,`fixed-${suffix}@example.com`);
+  await uploadBot(page,`Fixed seed player ${suffix}`);
+  await page.getByRole('button',{name:'Test your player',exact:true}).click();
+  await page.getByRole('button',{name:'Create private test room',exact:true}).click();
+  await expect(page).toHaveURL(/#room\//);
+  const roomUrl=page.url();
+  await page.getByLabel('Starting seed',{exact:true}).fill('31');
+  await page.getByLabel('Matches',{exact:true}).fill('3');
+  await page.getByLabel('Use the same seed for every match',{exact:true}).check();
+  await page.getByLabel('Rotate starting seats',{exact:true}).check();
+  await page.reload();
+  await expect(page.getByLabel('Use the same seed for every match',{exact:true})).toBeChecked();
+  await expect(page.getByLabel('Rotate starting seats',{exact:true})).toBeChecked();
+  await expect(page.getByLabel('Starting seed',{exact:true})).toHaveValue('31');
+  await page.getByRole('button',{name:'Run 3 matches →',exact:true}).click();
+  const links=page.getByRole('navigation',{name:'Batch matches'}).locator('a');
+  await expect(links).toHaveCount(3);
+  for(let index=0;index<3;index++)await expect(links.nth(index)).toContainText('Seed 31');
+  await expect(page.locator('#timeline')).toBeVisible({timeout:90000});
+  await expect(page.getByRole('button',{name:'Replay same seed',exact:true})).toBeEnabled({timeout:90000});
+  await page.goto(roomUrl);
+  await expect(page.locator('.batch-history summary')).toContainText('same seed');
+  await page.screenshot({path:'test-results/constant-seed-room.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
 test('match report expands played cards and inspects five resources for each player',async({page})=>{
   const {metadata,replay}=completeBoardFixture();
   const events=[
@@ -183,7 +214,7 @@ test('watch the sample, scrub, replay independently, and display responsive resu
   test.setTimeout(90000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('/');
-  await expect(page.getByRole('heading',{name:'Every move. At your own pace.'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Run and watch Catan bot matches'})).toBeVisible();
   await page.getByRole('button',{name:'Watch sample match',exact:true}).first().click();
   await expect(page.locator('#timeline')).toBeVisible({timeout:30000});
   await expect(page.locator('[data-tile]')).toHaveCount(19);
@@ -315,7 +346,7 @@ test('user names are rendered as text, and missing matches have a recoverable er
   await expect(page.getByRole('heading',{name:bot,exact:true})).toBeVisible();
   expect(await page.locator('.card img').count()).toBe(0);expect(alert).toBe(false);
   await page.goto('/#match/game-missing');
-  await expect(page.getByRole('heading',{name:'Something needs another look.'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Could not load this page'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Try again'})).toBeVisible();
 });
 

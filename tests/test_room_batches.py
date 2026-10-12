@@ -75,6 +75,19 @@ def test_batch_freezes_lineup_rotates_seats_and_uses_consecutive_seeds(setup):
     assert client.post(f'/rooms/{rid}/builtin-bot',headers=owner,json={'seat':1,'difficulty':'hard'}).status_code==400
 
 
+@pytest.mark.parametrize('rotate_seats', [False, True])
+def test_batch_can_keep_seed_constant_independently_of_seat_rotation(setup,rotate_seats):
+    client,queue=setup;rid,owner=ready_room(client,True)
+    # The highest valid seed also works in a batch when it is not incremented.
+    batch=start(client,rid,owner,seed=2**31-1,count=3,keep_seed=True,rotate_seats=rotate_seats)
+    games=[server.store.metadata(gid) for gid in batch['game_ids']]
+    assert [g['seed'] for g in games]==[2**31-1]*3
+    assert all(g['keep_seed'] for g in games) and len(queue.jobs)==3
+    assert [g['participants'][0]['room_seat'] for g in games]==([1,2,3] if rotate_seats else [1,1,1])
+    room=client.get(f'/rooms/{rid}',headers=owner).json()['room']
+    assert room['batches'][0]['keep_seed'] is True
+
+
 def test_cancel_preserves_running_match_and_room_can_be_reused(setup,monkeypatch):
     client,_=setup;rid,owner=ready_room(client,True)
     batch=start(client,rid,owner,count=3)
