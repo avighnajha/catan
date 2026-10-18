@@ -1,0 +1,7 @@
+FROM python:3.12-slim
+WORKDIR /sdk
+COPY src/__init__.py src/__init__.py
+COPY src/player/__init__.py src/player/interface.py src/player/types.py src/player/host.py src/player/
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+USER 65534:65534
+ENTRYPOINT ["python", "-u", "-m", "src.player.host", "--code-stdin", "--capture-errors"]

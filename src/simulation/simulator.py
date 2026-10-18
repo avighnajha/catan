@@ -86,12 +86,14 @@ class Simulator(RulesEngine):
         detail=getattr(self.players.get(pid),'last_error',None) or {}
         entry={'player_id':pid.value,'callback':callback,'phase':self.stage,
                'decision_id':self.decision_number,'turn_number':self.game_state.turn_state.turn_number,
-               'error':(detail.get('detail') or str(error))[:8192],
+               'error':(detail.get('detail') or detail.get('error') or str(error))[:8192],
                'traceback':(detail.get('traceback') or traceback.format_exc())[-16384:]}
         if callback=='validate_action':
             encoded=json.dumps(thaw(action),default=repr)
             entry['returned_action']=json.loads(encoded) if len(encoded)<=8192 else {'truncated_preview':encoded[:8192]}
             entry['available_types']=sorted({o['type'] for o in self.available_actions()})
+            entry['available_actions']=self.available_actions()
+            entry['player_view']=thaw(self.build_view_for_player(pid))
             entry['hint']='Return a concrete offered action unchanged. Fill TRADE/COUNTER give and receive maps (TRADE also needs recipients); fill DISCARD resources and omit count.'
         self.failures.append(entry)
 

@@ -5,7 +5,7 @@ import sys
 from dataclasses import asdict
 from .recording import RecordingSimulator
 from .replay_store import ReplayStore
-from ..player.process import ProcessPlayer
+from ..player.hosted import hosted_player
 from ..simulation.simulator import GameConfig
 from ..simulator.types.identifiers import PlayerId
 
@@ -28,7 +28,7 @@ def run_job(job):
                 continue
             if not package or not package.get('code'):
                 raise ValueError('Every seat must provide a validated Player implementation')
-            player=ProcessPlayer(package['code'],capture_errors=True)
+            player=hosted_player(package['code'])
             runners.append(player)
             players[pid]=player
         sim.register_players(players)

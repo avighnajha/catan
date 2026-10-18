@@ -1,6 +1,6 @@
 # Player API, protocol version 1
 
-Implement one Python class derived from `src.player.Player`. One instance lives for the whole match, independently for each seat. Do not implement JSON transport yourself; the SDK host handles it. Uploads must be trusted local code: resource/process limits are implemented, but filesystem and network access are not isolated.
+Implement one Python class derived from `src.player.Player`. One instance lives for the whole match, independently for each seat. Do not implement JSON transport yourself; the SDK host handles it. Hosted uploads run in isolated containers: no server files, external networking, credentials or other players' files are accessible. Python's standard library and the Player SDK are available; additional packages are not installed. A small private temporary directory is available during the match and is deleted afterward.
 
 ## Getting the SDK
 
@@ -264,9 +264,9 @@ python -m src.simulator.run --seed 42 --player examples/my_player.py --player ex
 
 Zero `--player` arguments use four example players. Four files use persistent processes. `--max-turns` overrides the default 1000-turn limit. `--audit private-audit.json` saves private decisions/events for local debugging; never publish that file as a replay.
 
-The web upload verifies import, one subclass, protocol version, construction, lifecycle/event handling and an initial legal decision. This smoke test cannot prove the strategy handles every later situation.
+The web upload shows three stages: quick checks (syntax, loading, class/protocol, lifecycle/events and an initial legal decision), 12 scenario checks (placement, turns, discards, robber, development-card effects and trades), then three games with different seeds and seats. Validation games do not appear in match history or account statistics. Only passing versions are saved. Failed checks show private diagnostics and leave your code editable; you can retry the same name/version. Valid play that reaches a simulation limit is reported separately from an implementation error. Passing these checks cannot prove every future situation is handled.
 
-Hosted uploads and the legacy `src.simulator.run` process adapter default to a two-second callback limit. Messages are limited to 2 MB and diagnostic retention to 16 KB. Windows Job Objects cap each submitted player at one process, 256 MB combined memory and 30 seconds of CPU over its lifetime; closing the job kills its process tree. POSIX uses process groups and resource limits. The platform also caps each match at 180 seconds. These execution limits are not network/filesystem security.
+Hosted uploads default to a two-second callback limit, 256 MB memory, 30 seconds of player CPU per instance, and a 180-second match limit. Messages are limited to 2 MB and diagnostic retention to 16 KB. The Docker runner additionally isolates files, networking and processes. It permits standard-library and SDK imports and a private 16 MB temporary directory; no backend data or extra installed packages are provided. The legacy local `src.simulator.run` adapter uses resource limits and Windows Job Objects/POSIX process groups, without hosted container isolation.
 
 The newer local `catansim` CLI uses trusted player processes without those OS memory/CPU/process-count caps, with a configurable `--timeout` (default two seconds). Player prints stream to stderr; `--quiet-player` suppresses them. `--debug` runs your original file in process for `breakpoint()` and IDE debugging, without callback timeouts. Failures include local decision/action details or tracebacks. `catansim update` (alias `catansim --update`) updates an installed simulator; see `LOCAL_DEVELOPMENT.md` for installation, first-time updates and full examples. These local options do not change hosted upload behaviour.
 

@@ -1,5 +1,6 @@
 """Private room access and built-in worker integration."""
 import uuid
+from pathlib import Path
 from fastapi.testclient import TestClient
 from src.platform.builtin_players import load_player
 from src.player import Player
@@ -45,7 +46,7 @@ def test_test_player_creates_three_ready_opponents(monkeypatch):
     client = TestClient(server.app)
     owner = account(client)
     bot = client.post('/bots/upload', headers=owner, json={'bot_name': 'Practice', 'bot_version': 'v1',
-        'bot_code': 'from src.player import Player\nclass P(Player):\n def choose_action(self,view,options): return options[0]\n'}).json()
+        'bot_code': Path('examples/my_player.py').read_text(encoding='utf-8')}).json()
     response = client.post('/bots/test', headers=owner, json={'bot_id': bot['bot_id'], 'difficulty': 'medium'})
     assert response.status_code == 200, response.text
     room = response.json()['room']

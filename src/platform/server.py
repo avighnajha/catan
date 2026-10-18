@@ -16,7 +16,7 @@ import hashlib
 import io
 import zipfile
 from functools import lru_cache
-from ..player.process import terminate_tree, validate_player
+from ..player.process import terminate_tree
 from ..player.example import ExamplePlayer
 
 from fastapi import FastAPI, HTTPException, Request
@@ -35,6 +35,7 @@ from .auth import AuthService
 from .builtin_players import catalog as builtin_catalog, package as builtin_package
 from .database import RoomAccess, Bot, RemovedBot
 from .room_batches import ACTIVE, FairMatchQueue, aggregate, group_batches
+from .validation_jobs import ValidationJobs
 
 DATABASE_URL = os.getenv("CATAN_DB_URL", "sqlite:///catan_platform.db")
 default_replays = (DATABASE_URL.removeprefix("sqlite:///") + ".replays"
@@ -653,19 +654,16 @@ def test_player(payload: TestPlayerRequest, request: Request):
         return {'room': result}
 
 
-@app.post("/bots/upload")
-def upload_bot(payload: BotUploadRequest, request: Request):
-    user = current_user(request)
+def save_validated_player(data,owner_id):
+    payload=BotUploadRequest(**data)
     with mutation_lock:
-        if not payload.use_sandbox or not payload.bot_code.strip():
-            raise ValueError("Upload a Python Player implementation")
-        existing = bot_registry.list_bots(user["user_id"] if user else None)
+        existing = bot_registry.list_bots(owner_id)
         if any(b["name"] == payload.bot_name.strip() and b["version"] == payload.bot_version.strip() for b in existing):
             raise HTTPException(409, "That version already exists. Choose a new version name.")
         name = payload.bot_name.strip()
         version = payload.bot_version.strip()
-        if user:
-            name_for_id = f"{user['user_id'][:13]}-{name}"
+        if owner_id:
+            name_for_id = f"{owner_id[:13]}-{name}"
         else:
             name_for_id = name
         if bot_registry.get_bot(f'{name_for_id}-{version}'):
@@ -673,22 +671,40 @@ def upload_bot(payload: BotUploadRequest, request: Request):
         package = bot_registry.register(name_for_id, version,
                                        entrypoint=payload.entrypoint, description=payload.description,
                                        bot_code=payload.bot_code if payload.use_sandbox else None,
-                                       use_sandbox=payload.use_sandbox, owner_id=user["user_id"] if user else None)
+                                       use_sandbox=payload.use_sandbox, owner_id=owner_id)
         package.name = name
-        if user:
+        if owner_id:
             with bot_registry.db_manager as session:
                 from .database import Bot
                 row = session.query(Bot).filter(Bot.id == package.bot_id).first()
                 row.name = name
-        if payload.bot_code and payload.use_sandbox:
-            try:
-                compile(payload.bot_code, "uploaded-bot.py", "exec")
-                validate_player(payload.bot_code)
-            except (SyntaxError, RuntimeError, TimeoutError, OSError, ValueError) as error:
-                package.validated = False
-                package.validation_errors = ["Player validation failed: define one Player subclass with choose_action and protocol version 1."]
-                bot_registry.bot_repository.update_bot_validation(package.bot_id, False, package.validation_errors)
         return package_data(package)
+
+
+validations=ValidationJobs(str(store.catalog_path),save_validated_player)
+
+
+@app.post('/bots/upload')
+def upload_bot(payload:BotUploadRequest,request:Request,wait:bool=True):
+    user=current_user(request)
+    owner=user['user_id'] if user else None
+    if not payload.use_sandbox or not payload.bot_code.strip(): raise ValueError('Upload a Python Player implementation')
+    if not payload.bot_name.strip() or not payload.bot_version.strip(): raise ValueError('Player name and version are required')
+    # Detect duplicates before doing expensive work. Recheck when committing.
+    if any(b['name']==payload.bot_name.strip() and b['version']==payload.bot_version.strip()
+           for b in bot_registry.list_bots(owner)):
+        raise HTTPException(409,'That version already exists. Choose a new version name.')
+    internal=f"{owner[:13]}-{payload.bot_name.strip()}" if owner else payload.bot_name.strip()
+    if bot_registry.get_bot(f'{internal}-{payload.bot_version.strip()}'):
+        raise HTTPException(409,'That version already exists, including removed versions. Choose a new version name.')
+    report=validations.submit(payload.model_dump(),owner)
+    return validations.wait(report,owner) if wait else report
+
+
+@app.get('/bots/validations/{validation_id}')
+def player_validation_report(validation_id:str,request:Request):
+    user=current_user(request)
+    return validations.get(validation_id,user['user_id'] if user else None)
 
 
 @app.get("/bots/{bot_id}")

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 from ..player import Player
 from ..player.example import ExamplePlayer
-from ..player.process import ProcessPlayer
+from ..player.hosted import hosted_player
 
 @dataclass
 class BotRunner(Player):
@@ -22,7 +22,7 @@ class BotRunner(Player):
     def validate(self):
         try:
             if self._delegate is None:
-                self._delegate=ProcessPlayer(self.bot_code) if self.use_sandbox else ExamplePlayer()
+                self._delegate=hosted_player(self.bot_code) if self.use_sandbox else ExamplePlayer()
             self.status='ready';self.ready=True
             return {'ok':True,'bot_id':self.bot_id,'version':self.version}
         except Exception as error:
@@ -40,6 +40,6 @@ class BotRunner(Player):
         return {'bot_id':self.bot_id,'status':self.status}
 
     def stop(self):
-        if isinstance(self._delegate,ProcessPlayer): self._delegate.close()
+        if hasattr(self._delegate,'close'): self._delegate.close()
         self._delegate=None;self.status='stopped'
         return {'bot_id':self.bot_id,'status':self.status}

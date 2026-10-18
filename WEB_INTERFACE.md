@@ -59,9 +59,11 @@ Public replay format is documented in `src/platform/REPLAY_CONTRACT.md`. Old met
 
 ## Player execution and remaining hosting work
 
-The complete simulator is described in [Player API](PLAYER_API.md) and [Project structure](PROJECT_STRUCTURE.md). Code uploads implement one persistent Player class; each seat gets a separate instance/process. Import, protocol, lifecycle and initial-decision smoke checks run during validation. Old script-protocol versions remain stored but need a new compatible implementation version to run.
+The complete simulator is described in [Player API](PLAYER_API.md) and [Project structure](PROJECT_STRUCTURE.md). Code uploads implement one persistent Player class; each seat gets a separate instance/container in hosted deployment. Quick checks, decision scenarios and three games run before saving a version. Old script-protocol versions remain stored but need a new compatible implementation version to run.
 
-Submitted players have callback, message and resource limits. This is still a trusted local application: authenticated ownership and filesystem/network isolation for public untrusted hosting are not implemented. Direct in-process players are trusted and unbounded; the web runner uses process execution.
+Hosted players run in individual containers with no application data mounts or external networking, plus callback, message and resource limits. The trusted broker owns Docker access; the API and player containers do not. See [Deployment](DEPLOYMENT.md) for the security boundary and rootless Docker option. Direct in-process players and the local subprocess development mode remain trusted execution.
+
+When saving a new version, the upload dialog shows Quick checks, Scenario checks and Full game checks. Twelve scenarios exercise setup, normal turns, discards, robber movement, development-card effects and trade negotiation; three games use different seeds and player seats. Green ticks show completed checks. Failures retain the source in the form and show owner-private exception/action details; later checks are skipped. Only a passing version is saved, and validation games never enter rooms, match history or account statistics. A legal simulation reaching its configured limit is reported as such rather than as a strategy failure. Checks provide coverage, not a guarantee of every future decision.
 
 Every engine transition invokes the recording observer. The client consumes snapshots and does not reproduce Catan rules. Public production and trading events are retained; private audit files are stored separately and are not downloadable through replay endpoints. The winner's total score is revealed at completion; other players' hidden cards remain excluded.
 

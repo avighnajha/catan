@@ -1,10 +1,11 @@
 import {test,expect} from '@playwright/test';
 import {completeBoardFixture} from './complete-board-fixture.js';
+import {readFileSync} from 'node:fs';
 
-const playerCode=`from src.player.example import ExamplePlayer
-class BrowserPlayer(ExamplePlayer):
-    pass
-`;
+// Self-contained test player: the production image intentionally has no
+// simulator implementation imports. Keep matches short in the UI suite.
+const playerCode=readFileSync(new URL('../../src/player/example.py',import.meta.url),'utf8')
+  .replace('from .interface import Player, thaw','from src.player import Player, thaw');
 
 test('reusable private room runs a batch, navigates matches, shows statistics and rematches',async({page})=>{
   test.setTimeout(180000);
@@ -282,6 +283,7 @@ test('edit player metadata, save changed code as a new version and remove a vers
   await expect(page.locator('#editBotForm .form-error')).toContainText('new version');
   await page.getByRole('textbox',{name:'New version',exact:true}).fill('v2');
   await page.getByRole('button',{name:'Save changes',exact:true}).click();
+  await page.getByRole('button',{name:'Done',exact:true}).click({timeout:120000});
   await expect(page.locator('article.card')).toHaveCount(2);
   const original=page.locator('article.card').filter({has:page.locator('.eyebrow',{hasText:'v1'})});
   await original.getByRole('button',{name:'Remove',exact:true}).click();
@@ -325,14 +327,55 @@ async function register(page,name,email){
   await expect(page.locator('#accountName')).toHaveText(name);
 }
 async function uploadBot(page,bot,testAfterSaving=false){
+  test.setTimeout(240000);
   await page.goto('/#bots');
   await page.getByRole('button',{name:'+ Add player version',exact:true}).click();
   await page.getByRole('textbox',{name:'Player name',exact:true}).fill(bot);
   await page.getByRole('textbox',{name:'Version',exact:true}).fill('v1');
   await page.getByRole('textbox',{name:'Or paste code',exact:true}).fill(playerCode);
   await page.getByRole('button',{name:testAfterSaving?'Save and test your player':'Save player version',exact:true}).click();
+  await page.getByRole('button',{name:testAfterSaving?'Continue to test room':'Done',exact:true}).click({timeout:120000});
   await expect(page.getByRole('heading',{name:bot,exact:true})).toBeVisible();
 }
+
+test('upload shows three validation stages, private errors and an editable retry',async({page})=>{
+  await page.goto('/');
+  const suffix=Date.now();await register(page,`Validation${suffix}`,`validation${suffix}@example.com`);
+  let retry=false,polls=0;
+  const stages={quick:{status:'passed',message:'Source and lifecycle passed'},scenarios:{status:'running',message:'Discard after seven'},games:{status:'pending',message:'Waiting'}};
+  await page.route('**/bots/upload?wait=false',route=>{polls=0;return route.fulfill({json:{validation_id:'fixture',status:'queued',stages}});});
+  await page.route('**/bots/validations/fixture',route=>{
+    polls++;
+    if(polls<2)return route.fulfill({json:{validation_id:'fixture',status:'running',stages}});
+    if(retry)return route.fulfill({json:{validation_id:'fixture',status:'passed',bot_id:'saved-fixture',validated:true,stages:Object.fromEntries(['quick','scenarios','games'].map(key=>[key,{status:'passed',message:'Passed'}]))}});
+    return route.fulfill({json:{validation_id:'fixture',status:'failed',stages:{...stages,scenarios:{status:'failed',message:'Invalid discard',details:{error:'DISCARD requires resources',scenario:'Discard after seven',callback:'validate_action',phase:'DISCARD',returned_action:{type:'DISCARD',count:5},available_types:['DISCARD'],traceback:'ValueError: <script>private error</script>'}},games:{status:'skipped',message:'Not run because an earlier stage failed'}}}});
+  });
+  await page.goto('/#bots');await page.getByRole('button',{name:'+ Add player version',exact:true}).click();
+  await page.getByRole('textbox',{name:'Player name',exact:true}).fill('Validation test');
+  await page.getByRole('textbox',{name:'Version',exact:true}).fill('v1');
+  await page.getByRole('textbox',{name:'Or paste code',exact:true}).fill(playerCode);
+  await page.getByRole('button',{name:'Save player version',exact:true}).click();
+  await expect(page.locator('[data-validation-stage=quick]')).toContainText('Passed');
+  await expect(page.locator('[data-validation-stage=scenarios]')).toContainText('Running');
+  await expect(page.getByText('DISCARD requires resources',{exact:true})).toBeVisible();
+  await expect(page.getByText('ValueError: <script>private error</script>',{exact:true})).toBeVisible();
+  await expect(page.locator('#modalBody script')).toHaveCount(0);
+  await expect(page.getByRole('textbox',{name:'Or paste code',exact:true})).toBeEnabled();
+  await expect(page.locator('[data-validation-stage=games]')).toContainText('Not run');
+  await page.screenshot({path:'test-results/upload-validation-error.png'});
+  retry=true;await page.getByRole('textbox',{name:'Or paste code',exact:true}).fill(playerCode+'\n# corrected');
+  await page.getByRole('button',{name:'Save player version',exact:true}).click();
+  await expect(page.locator('.validation-stage.passed')).toHaveCount(3);
+  await expect(page.getByRole('button',{name:'Save player version',exact:true})).toBeDisabled();
+  await page.screenshot({path:'test-results/upload-validation-success.png'});
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('button',{name:'Done',exact:true}).scrollIntoViewIfNeeded();
+  await expect(page.locator('#modal')).toBeVisible();
+  expect(await page.locator('#modal').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+  await page.screenshot({path:'test-results/upload-validation-mobile.png'});
+  await page.getByRole('button',{name:'Done',exact:true}).click();
+  await expect(page.locator('#modal')).not.toBeVisible();
+});
 test('watch the sample, scrub, replay independently, and display responsive results',async({page,context})=>{
   test.setTimeout(90000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));

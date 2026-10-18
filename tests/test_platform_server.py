@@ -4,6 +4,7 @@ import os
 import tempfile
 import time
 import uuid
+from pathlib import Path
 from fastapi.testclient import TestClient
 
 # Use a temporary database for testing
@@ -16,10 +17,7 @@ print([(list(r.methods), r.path) for r in app.routes if hasattr(r, 'methods')])
 
 client = TestClient(app)
 
-PLAYER_CODE = """from src.player import Player
-class TestPlayer(Player):
-    def choose_action(self, view, options): return options[0]
-"""
+PLAYER_CODE = Path('examples/my_player.py').read_text(encoding='utf-8')
 
 
 def player_payload(name, version="v1"):
@@ -43,7 +41,7 @@ def create_game(seed=42):
 
 
 def wait_for_recording(game_id):
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         metadata = client.get(f"/games/{game_id}").json()
         if metadata.get("replay_available"):
@@ -142,17 +140,13 @@ def test_list_and_upload_bot_registry():
         "/bots/upload",
         json={**player_payload("", "v2")},
     )
-    assert invalid.status_code == 200
-    assert invalid.json()["validated"] is False
+    assert invalid.status_code == 400
+    assert 'required' in invalid.json()['detail']
 
 
 def test_upload_sandboxed_bot():
     """Test uploading a sandboxed bot with code."""
-    bot_code = """
-from src.player import Player
-class MyPlayer(Player):
-    def choose_action(self,view,options): return options[0]
-"""
+    bot_code = PLAYER_CODE
     upload_response = client.post(
         "/bots/upload",
         json={

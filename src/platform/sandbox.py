@@ -1,7 +1,8 @@
 """Legacy settings retained for stored versions; not a security boundary.
 
-Execution is implemented by src.player.process.ProcessPlayer. OS isolation for
-public untrusted hosting is deployment-specific; this application is local.
+Hosted execution is implemented by src.player.hosted and src.player.runner.
+These legacy dataclass fields do not configure the container security policy;
+that policy is fixed by the trusted runner and Compose deployment.
 """
 from dataclasses import dataclass
 

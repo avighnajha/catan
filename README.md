@@ -33,4 +33,4 @@ npm run test:playback
 npm run test:browser
 ```
 
-Use one local server process. Accounts and secure execution of untrusted uploaded bots are not implemented yet.
+Use one API server process. Accounts and private bot ownership are supported. For hosted uploads, use the isolated Docker runner in [Deployment](DEPLOYMENT.md); local subprocess execution is for trusted development only.

@@ -1,6 +1,7 @@
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,7 +13,7 @@ from src.platform.match_worker import run_job
 from src.platform.database import RoomAccess
 from tests.test_builtin_rooms import account
 
-CODE='from src.player import Player\nclass P(Player):\n def choose_action(self,view,options): return options[0]\n'
+CODE=Path('examples/my_player.py').read_text(encoding='utf-8')
 
 
 class CaptureQueue:

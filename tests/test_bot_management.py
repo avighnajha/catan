@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -12,7 +13,7 @@ def test_owner_can_edit_metadata_remove_library_entry_and_keep_original_code(mon
     client=TestClient(server.app)
     owner,stranger=account(client),account(client)
     name='Editable'+uuid.uuid4().hex[:8]
-    code='from src.player import Player\nclass P(Player):\n def choose_action(self,view,options): return options[0]\n'
+    code=Path('examples/my_player.py').read_text(encoding='utf-8')
     response=client.post('/bots/upload',headers=owner,json={'bot_name':name,'bot_version':'v1','bot_code':code})
     assert response.status_code==200,response.text
     bid=response.json()['bot_id']

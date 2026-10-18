@@ -11,8 +11,14 @@ services:
       CATAN_FRONTEND_ORIGINS: "${CATAN_FRONTEND_ORIGINS:-}"
       CATAN_AUTH_REQUIRED: "${CATAN_AUTH_REQUIRED:-1}"
       CATAN_MAX_BATCH_SIZE: "${CATAN_MAX_BATCH_SIZE:-10}"
+      CATAN_PLAYER_MODE: runner
+      CATAN_RUNNER_SOCKET: /run/catan-runner/runner.sock
     volumes:
       - catan-data:/data
+      - runner-socket:/run/catan-runner
+    depends_on:
+      runner:
+        condition: service_healthy
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=256m
     read_only: true
@@ -23,5 +29,38 @@ services:
     pids_limit: 256
     mem_limit: 1g
 
+  runner:
+    network_mode: none
+    group_add:
+      - "${CATAN_DOCKER_GID:-0}"
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    init: true
+    restart: unless-stopped
+    environment:
+      CATAN_RUNNER_SOCKET: /run/catan-runner/runner.sock
+      CATAN_PLAYER_IMAGE: catan-player:local
+      CATAN_RUNNER_ID: catan-production
+    volumes:
+      - ${CATAN_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - runner-socket:/run/catan-runner
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(socket.AF_UNIX); s.connect('/run/catan-runner/runner.sock'); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+
 volumes:
   catan-data:
+  runner-socket:

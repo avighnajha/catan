@@ -48,13 +48,15 @@ def terminate_tree(process):
 
 
 class ProcessPlayer(Player):
-    def __init__(self,code,timeout=2.0,trusted_local=False,log_stream=None,source_path=None,capture_errors=False):
+    def __init__(self,code,timeout=2.0,trusted_local=False,log_stream=None,source_path=None,capture_errors=False,
+                 _command=None,_initial_input=None,_cleanup=None,_startup_timeout=None):
         self.timeout=timeout
         self.trusted_local=trusted_local
         self.log_stream=log_stream
         self.last_error=None
         self.closed=False
         self.job=None
+        self._cleanup=_cleanup
         self.temp=tempfile.TemporaryDirectory(prefix='catan_player_')
         source=Path(self.temp.name)/'implementation.py'
         source.write_text(code,encoding='utf-8')
@@ -71,14 +73,18 @@ class ProcessPlayer(Player):
         # can therefore shadow the installed simulator's src.player package.
         # Pin our own package first while preserving the user's working directory.
         bootstrap="import sys, runpy; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module('src.player.host', run_name='__main__', alter_sys=True)"
-        command=[sys.executable,'-u','-c',bootstrap,str(Path(__file__).resolve().parents[2]),str(source)]
+        # Windows venv's python.exe is a launcher that creates another process;
+        # use the base interpreter for the one-process restricted SDK host.
+        interpreter=getattr(sys,'_base_executable',sys.executable) if os.name=='nt' and not trusted_local else sys.executable
+        command=[interpreter,'-u','-c',bootstrap,str(Path(__file__).resolve().parents[2]),str(source)]
         if trusted_local: command.append('--trusted-local')
         if capture_errors: command.append('--capture-errors')
+        if _command is not None: command=_command
         self.process=subprocess.Popen(command,
             cwd=None if trusted_local else self.temp.name,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
             creationflags=(subprocess.CREATE_NO_WINDOW | (0 if trusted_local else 0x4)) if os.name=='nt' else 0,
             start_new_session=os.name!='nt')
-        if os.name=='nt' and not trusted_local:
+        if os.name=='nt' and not trusted_local and _command is None:
             try:
                 from .windows_job import WindowsJob
                 self.job=WindowsJob(self.process)
@@ -89,8 +95,18 @@ class ProcessPlayer(Player):
         self.error_thread=threading.Thread(target=self._drain_errors,daemon=True)
         self.error_thread.start()
         try:
+            self.timeout=_startup_timeout or timeout
+            if _initial_input is not None:
+                completed=threading.Event()
+                def initialize():
+                    try: self.process.stdin.write(_initial_input);self.process.stdin.flush()
+                    except (OSError,ValueError): pass
+                    finally: completed.set()
+                threading.Thread(target=initialize,daemon=True).start()
+                if not completed.wait(self.timeout): raise TimeoutError('Player startup input stalled')
             hello=self._receive()
             if hello!={'ready':True,'protocol_version':1}: raise RuntimeError('Player handshake failed')
+            self.timeout=timeout
         except Exception as error:
             self.close()
             if capture_errors: error.player_diagnostics=self.diagnostics.decode('utf-8',errors='replace')
@@ -104,8 +120,8 @@ class ProcessPlayer(Player):
                 if len(line)>MAX_MESSAGE: raise RuntimeError('Response exceeds limit')
                 item=json.loads(line)
                 self.messages.put_nowait(item)
-        except Exception:
-            try: self.messages.put_nowait({'error':'Invalid player protocol or process exit'})
+        except Exception as error:
+            try: self.messages.put_nowait({'error':'Invalid player protocol or process exit','detail':str(error)})
             except queue.Full: pass
 
     def _drain_errors(self):
@@ -157,6 +173,7 @@ class ProcessPlayer(Player):
         if self.closed: return
         self.closed=True
         if self.job: self.job.close()
+        if self._cleanup: self._cleanup()
         terminate_tree(self.process)
         self.error_thread.join(timeout=1)
         for pipe in (self.process.stdin,self.process.stdout,self.process.stderr):

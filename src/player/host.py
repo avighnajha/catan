@@ -12,12 +12,25 @@ MAX_MESSAGE = 2_000_000
 
 
 def main():
+    if len(sys.argv)>1 and sys.argv[1]=='--code-stdin':
+        # Used only inside the disposable player container. No host mounts.
+        from pathlib import Path
+        first=sys.stdin.buffer.readline(1_000_001)
+        if len(first)>1_000_000: raise ValueError('Source exceeds limit')
+        code=json.loads(first)['code']
+        if not isinstance(code,str) or len(code)>200_000: raise ValueError('Invalid source')
+        Path('/tmp/implementation.py').write_text(code,encoding='utf-8')
+        sys.argv[1]='/tmp/implementation.py'
     if os.name!='nt' and '--trusted-local' not in sys.argv[2:]:
         import resource
-        resource.setrlimit(resource.RLIMIT_AS,(256*1024*1024,256*1024*1024))
-        resource.setrlimit(resource.RLIMIT_CPU,(30,30))
-        resource.setrlimit(resource.RLIMIT_FSIZE,(10*1024*1024,10*1024*1024))
-        resource.setrlimit(resource.RLIMIT_NOFILE,(64,64))
+        def restrict(kind,wanted):
+            _,hard=resource.getrlimit(kind)
+            limit=wanted if hard==resource.RLIM_INFINITY else min(wanted,hard)
+            resource.setrlimit(kind,(limit,limit))
+        restrict(resource.RLIMIT_AS,256*1024*1024)
+        restrict(resource.RLIMIT_CPU,30)
+        restrict(resource.RLIMIT_FSIZE,10*1024*1024)
+        restrict(resource.RLIMIT_NOFILE,64)
     output=sys.stdout
     # User prints are diagnostics, never protocol messages.
     with contextlib.redirect_stdout(sys.stderr):
